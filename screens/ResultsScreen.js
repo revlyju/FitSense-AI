@@ -1,0 +1,386 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  Share,
+  Alert,
+  Linking,
+  Image,
+} from 'react-native';
+import ColorCard from '../components/ColorCard';
+import OutfitCard from '../components/OutfitCard';
+
+const ResultsScreen = ({ navigation, route }) => {
+  const analysisResults = route?.params?.analysisResults;
+  const userPreferences = route?.params?.userPreferences;
+  const [savedLooks, setSavedLooks] = useState([]);
+
+  useEffect(() => {
+    if (!analysisResults || !userPreferences) {
+      navigation.replace('Onboarding');
+    }
+  }, [analysisResults, userPreferences, navigation]);
+
+  if (!analysisResults || !userPreferences) {
+    return null;
+  }
+
+  const handleSaveLook = () => {
+    setSavedLooks([...savedLooks, analysisResults]);
+    Alert.alert('Saved', 'This look has been saved!');
+  };
+
+  const handleShareLook = async () => {
+    try {
+      await Share.share({
+        message: `Check out my AI-generated style profile! Color Season: ${analysisResults.colorSeason}, Recommended metals: ${analysisResults.jewelry.recommended}`,
+        title: 'AI Stylist Profile',
+      });
+    } catch (error) {
+      console.error('Share error:', error);
+    }
+  };
+
+  const handleBuyNow = (link) => {
+    Linking.openURL(link).catch(() => {
+      Alert.alert('Error', 'Could not open the link');
+    });
+  };
+
+  const handleBack = () => {
+    navigation.navigate('Onboarding');
+  };
+
+  return (
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Your Style Profile</Text>
+      </View>
+
+      <View style={styles.summarySection}>
+        <Text style={styles.sectionTitle}>Style Summary</Text>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Undertone</Text>
+            <Text style={styles.summaryValue}>{analysisResults.undertone}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Contrast Level</Text>
+            <Text style={styles.summaryValue}>{analysisResults.contrastLevel}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Color Season</Text>
+            <Text style={styles.summaryValue}>{analysisResults.colorSeason}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <Text style={styles.summaryText}>{analysisResults.summaryExplanation}</Text>
+        </View>
+      </View>
+
+      <View style={styles.colorsSection}>
+        <Text style={styles.sectionTitle}>Your Color Palette</Text>
+
+        <View style={styles.colorSubsection}>
+          <Text style={styles.colorSubtitle}>Best Neutrals</Text>
+          {analysisResults.bestNeutrals.map((color, idx) => (
+            <ColorCard key={idx} color={color} />
+          ))}
+        </View>
+
+        <View style={styles.colorSubsection}>
+          <Text style={styles.colorSubtitle}>Best Accent Colors</Text>
+          {analysisResults.bestAccentColors.map((color, idx) => (
+            <ColorCard key={idx} color={color} />
+          ))}
+        </View>
+
+        <View style={styles.colorSubsection}>
+          <Text style={styles.colorSubtitle}>Colors To Avoid</Text>
+          {analysisResults.avoidColors.map((color, idx) => (
+            <ColorCard key={idx} color={color} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.jewelrySection}>
+        <Text style={styles.sectionTitle}>Jewelry Recommendation</Text>
+        <View style={styles.jewelryCard}>
+          <View style={styles.jewelryRow}>
+            <Text style={styles.jewelryLabel}>Recommended Metal</Text>
+            <Text style={styles.jewelryValue}>{analysisResults.jewelry.recommended}</Text>
+          </View>
+          <View style={styles.jewelryDivider} />
+          <View style={styles.jewelryRow}>
+            <Text style={styles.jewelryLabel}>Metal to Avoid</Text>
+            <Text style={styles.jewelryValue}>{analysisResults.jewelry.avoid}</Text>
+          </View>
+          <View style={styles.jewelryDivider} />
+          <Text style={styles.jewelryReason}>{analysisResults.jewelry.reason}</Text>
+        </View>
+      </View>
+
+      {analysisResults.necklines && (
+        <View style={styles.necklinesSection}>
+          <Text style={styles.sectionTitle}>Neckline Recommendations</Text>
+          <View style={styles.necklinesCard}>
+            <View style={styles.necklinesSubsection}>
+              <Text style={styles.necklinesSubtitle}>Recommended Necklines</Text>
+              <View style={styles.necklinesTagContainer}>
+                {analysisResults.necklines.recommended.map((neckline, idx) => (
+                  <View key={idx} style={styles.tag}>
+                    <Text style={styles.tagText}>{neckline}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+            <View style={styles.necklinesDivider} />
+            <View style={styles.necklinesSubsection}>
+              <Text style={styles.necklinesSubtitle}>Necklines to Avoid</Text>
+              <View style={styles.necklinesTagContainer}>
+                {analysisResults.necklines.avoid.map((neckline, idx) => (
+                  <View key={idx} style={[styles.tag, styles.tagAvoid]}>
+                    <Text style={[styles.tagText, styles.tagAvoidText]}>{neckline}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+            <View style={styles.necklinesDivider} />
+            <Text style={styles.necklinesReason}>{analysisResults.necklines.reason}</Text>
+          </View>
+        </View>
+      )}
+
+      <View style={styles.outfitsSection}>
+        <Text style={styles.sectionTitle}>Recommended Outfits</Text>
+        <FlatList
+          data={analysisResults.outfits}
+          keyExtractor={item => item.id}
+          scrollEnabled={false}
+          renderItem={({ item }) => (
+            <OutfitCard outfit={item} onBuyPress={() => handleBuyNow(item.link)} />
+          )}
+        />
+      </View>
+
+      <View style={styles.actionSection}>
+        <TouchableOpacity style={styles.actionButton} onPress={handleSaveLook}>
+          <Text style={styles.actionButtonText}>Save Look</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={handleShareLook}>
+          <Text style={[styles.actionButtonText, styles.shareButtonText]}>Share Look</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.spacer} />
+    </ScrollView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+    paddingTop: 50,
+  },
+  header: {
+    paddingHorizontal: 20,
+    marginBottom: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    marginRight: 15,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    fontWeight: '600',
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  summarySection: {
+    paddingHorizontal: 20,
+    marginBottom: 28,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 15,
+  },
+  summaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 8,
+  },
+  summaryText: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginTop: 8,
+  },
+  colorsSection: {
+    paddingHorizontal: 20,
+    marginBottom: 28,
+  },
+  colorSubsection: {
+    marginBottom: 20,
+  },
+  colorSubtitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 12,
+  },
+  jewelrySection: {
+    paddingHorizontal: 20,
+    marginBottom: 28,
+  },
+  jewelryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  jewelryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  jewelryLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  jewelryValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  jewelryDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 8,
+  },
+  jewelryReason: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginTop: 8,
+  },
+  necklinesSection: {
+    paddingHorizontal: 20,
+    marginBottom: 28,
+  },
+  necklinesCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  necklinesSubsection: {
+    marginBottom: 12,
+  },
+  necklinesSubtitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 10,
+  },
+  necklinesTagContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tag: {
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  tagText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  tagAvoid: {
+    backgroundColor: '#ffe8e8',
+  },
+  tagAvoidText: {
+    color: '#d32f2f',
+  },
+  necklinesDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 12,
+  },
+  necklinesReason: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginTop: 8,
+  },
+  outfitsSection: {
+    paddingHorizontal: 20,
+    marginBottom: 28,
+  },
+  actionSection: {
+    paddingHorizontal: 20,
+    marginBottom: 28,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  actionButton: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  shareButton: {
+    backgroundColor: '#e8e8e8',
+  },
+  shareButtonText: {
+    color: '#1a1a1a',
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  spacer: {
+    height: 20,
+  },
+});
+
+export default ResultsScreen;

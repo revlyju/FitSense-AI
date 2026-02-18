@@ -1,19 +1,19 @@
-import React, { useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import { useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  RefreshControl,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
   Alert,
-  TextInput,
-  Modal,
   FlatList,
+  Image,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
 import SelectionButton from '../components/SelectionButton';
 
 const OnboardingScreen = ({ navigation }) => {
@@ -28,18 +28,19 @@ const OnboardingScreen = ({ navigation }) => {
   });
 
   const [image, setImage] = useState(null);
+  const [imageBase64, setImageBase64] = useState(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  
+
   const [modalVisible, setModalVisible] = useState(false);
   const [activeField, setActiveField] = useState(null);
   const lastPickerTapMsRef = useRef({});
 
   const options = {
     gender: ['Male', 'Female', 'Non-binary', 'Other'],
-    bodyType: ['Pear', 'Hourglass', 'Rectangle', 'Apple', 'Athletic', 'Inverted Triangle', 'Petite', 'Plus Size', 'Other'],
+    bodyType: ['Pear', 'Hourglass', 'Rectangle', 'Apple', 'Athletic', 'Inverted Triangle', 'Petite', 'Plus Size', 'Other', 'Let AI Detect'],
     occasion: ['Casual', 'Formal', 'Business Casual', 'Date Night', 'Workout', 'Wedding Guest', 'Cocktail', 'Festival', 'Gala', 'Vacation', 'Other'],
-    stylePreference: ['Minimalist', 'Streetwear', 'Bohemian', 'Old Money', 'Preppy', 'Grunge', 'Y2K', 'Vintage', 'Avant-Garde', 'Cottagecore', 'Dark Academia', 'Other'],
+    stylePreference: ['Minimalist', 'Streetwear', 'Bohemian', 'Old Money', 'Preppy', 'Grunge', 'Y2K', 'Vintage', 'Avant-Garde', 'Cottagecore', 'Dark Academia', 'Other', 'Let AI Recommend'],
     skinTone: ['Very Fair', 'Fair', 'Medium', 'Olive', 'Tan', 'Deep', 'Rich', 'Other'],
     contrastLevel: ['Low', 'Medium', 'High', 'Let AI Detect'],
     undertone: ['Warm', 'Cool', 'Neutral', 'Olive', 'Let AI Detect'],
@@ -69,6 +70,7 @@ const OnboardingScreen = ({ navigation }) => {
       undertone: null,
     });
     setImage(null);
+    setImageBase64(null);
     setLoading(false);
     setModalVisible(false);
     setActiveField(null);
@@ -100,9 +102,13 @@ const OnboardingScreen = ({ navigation }) => {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [3, 4],
-      quality: 0.8,
+      quality: 0.5,
+      base64: true,
     });
-    if (!result.canceled) setImage(result.assets[0].uri);
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
+      setImageBase64(result.assets[0].base64);
+    }
   };
 
   // --- FIXED LOGIC ---
@@ -115,7 +121,7 @@ const OnboardingScreen = ({ navigation }) => {
 
     if (missingFields.length > 0 || !image) {
       Alert.alert(
-        'Missing Information', 
+        'Missing Information',
         'Please ensure all categories are selected. If you chose "Other", please type your specific preference.'
       );
       return;
@@ -124,7 +130,7 @@ const OnboardingScreen = ({ navigation }) => {
     setLoading(true);
     // Simulate navigation or actual logic
     navigation.navigate('Loading', {
-      userPreferences: { ...selections, image },
+      userPreferences: { ...selections, image: imageBase64, imageUri: image }, // Pass base64 for backend, uri for potential display
     });
   };
   // -------------------
@@ -137,7 +143,7 @@ const OnboardingScreen = ({ navigation }) => {
           <SelectionButton
             key={option}
             label={option}
-            isSelected={selections[field] === option || (option === 'Other' && selections[field] !== null && !options[field].slice(0,-1).includes(selections[field]))}
+            isSelected={selections[field] === option || (option === 'Other' && selections[field] !== null && !options[field].slice(0, -1).includes(selections[field]))}
             onPress={() => updateSelection(field, option)}
             onDoubleTap={() => updateSelection(field, null)}
             width="48%"
@@ -206,8 +212,8 @@ const OnboardingScreen = ({ navigation }) => {
           )}
         </View>
 
-        <TouchableOpacity 
-          style={[styles.analyzeButton, loading && styles.analyzeButtonDisabled]} 
+        <TouchableOpacity
+          style={[styles.analyzeButton, loading && styles.analyzeButtonDisabled]}
           onPress={handleAnalyze}
           disabled={loading}
         >
@@ -226,13 +232,13 @@ const OnboardingScreen = ({ navigation }) => {
                 <Text style={styles.closeText}>Done</Text>
               </TouchableOpacity>
             </View>
-            
+
             <FlatList
               data={activeField ? options[activeField] : []}
               keyExtractor={(item) => item}
               renderItem={({ item }) => (
-                <TouchableOpacity 
-                  style={styles.modalOption} 
+                <TouchableOpacity
+                  style={styles.modalOption}
                   onPress={() => updateSelection(activeField, item)}
                 >
                   <Text style={styles.modalOptionText}>{item}</Text>

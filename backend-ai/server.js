@@ -7,14 +7,25 @@ const axios = require("axios");
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "75mb" })); // increase limit for base64 images
+app.use(express.json({ limit: "75mb" }));
+
+const GEMINI_MODELS_TO_TRY = [
+  process.env.GEMINI_MODEL,
+  "gemini-2.5-flash",
+  "gemini-1.5-flash",
+  "gemini-2.0-flash",
+].filter(Boolean);
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function parseImageBase64(input) {
   if (!input || typeof input !== "string") return null;
 
   const trimmed = input.trim();
 
-  // data URI: data:image/png;base64,AAAA
   const dataUriMatch = trimmed.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s);
   if (dataUriMatch) {
     const mimeType = dataUriMatch[1];
@@ -22,7 +33,6 @@ function parseImageBase64(input) {
     return { mimeType, data };
   }
 
-  // raw base64 (no prefix)
   const data = trimmed.replace(/\s+/g, "");
   return { mimeType: "image/jpeg", data };
 }
@@ -30,14 +40,10 @@ function parseImageBase64(input) {
 function tryParseJsonFromText(text) {
   if (typeof text !== "string") return { ok: false, value: null, error: "Non-string model output" };
 
-  // If it's valid JSON already, great.
   try {
     return { ok: true, value: JSON.parse(text) };
-  } catch (_) {
-    // fall through
-  }
+  } catch (_) { }
 
-  // Attempt to extract the first JSON object/array substring (common when model adds extra text).
   const firstBrace = text.indexOf("{");
   const firstBracket = text.indexOf("[");
   const start =
@@ -46,7 +52,7 @@ function tryParseJsonFromText(text) {
         Math.min(firstBrace, firstBracket);
 
   if (start === -1) {
-    return { ok: false, value: null, error: "No JSON object/array found in model output" };
+    return { ok: false, value: null, error: "No JSON object found in model output" };
   }
 
   const slice = text.slice(start).trim();
@@ -57,15 +63,50 @@ function tryParseJsonFromText(text) {
   }
 }
 
+async function callGemini(url, payload) {
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+
+    const response = await axios.post(url, payload, {
+      timeout: 90000,
+      headers: { "Content-Type": "application/json" },
+      validateStatus: () => true,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
+    });
+
+    if (response.status === 429 || response.status >= 500) {
+      console.warn(`Gemini rate limit or server error hit (Status ${response.status}). Retry attempt ${attempt}`);
+      await sleep(2000);
+      continue;
+    }
+
+    return response;
+  }
+
+  // Return the last response even if it's an error so the caller can log it and try the next model
+  const lastResponse = await axios.post(url, payload, {
+    timeout: 90000,
+    headers: { "Content-Type": "application/json" },
+    validateStatus: () => true,
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity
+  });
+  return lastResponse;
+}
+
 app.post("/analyze-style", async (req, res) => {
+
   try {
+
     console.log("[/analyze-style] body keys:", Object.keys(req.body || {}));
-    const {
+
+    let {
       gender,
       skinTone,
       hairColor,
-      eyeColor,
       stylePreference,
+      eyeColor,
       occasion,
       bodyType,
       contrastLevel,
@@ -74,166 +115,195 @@ app.post("/analyze-style", async (req, res) => {
     } = req.body || {};
 
     if (!process.env.GEMINI_API_KEY) {
-      console.error("[/analyze-style] GEMINI_API_KEY missing");
       return res.status(500).json({
-        error: "Server misconfigured: GEMINI_API_KEY missing",
-        hint: "Set GEMINI_API_KEY in backend-ai/.env and restart the server",
+        error: "GEMINI_API_KEY missing in .env"
       });
     }
 
     const parsedImage = parseImageBase64(image);
+
     if (!parsedImage || !parsedImage.data) {
       return res.status(400).json({
-        error: "No image provided",
-        hint: "Send `image` as base64 string (optionally with data:image/...;base64, prefix)",
+        error: "No image provided"
       });
     }
 
-    console.log(
-      `[/analyze-style] image received: mime=${parsedImage.mimeType} base64Length=${parsedImage.data.length}`
-    );
+    const safeSkinTone = skinTone === "Let AI Detect" ? "Detect from image" : (skinTone ?? "Not specified");
+    const safeUndertone = undertone === "Let AI Detect" ? "Detect from image" : (undertone ?? "Not specified");
+    const safeContrast = contrastLevel === "Let AI Detect" ? "Detect from image" : (contrastLevel ?? "Not specified");
+    const safeBodyType = bodyType === "Let AI Detect" ? "Detect from image" : (bodyType ?? "Not specified");
+    const safeStyle = stylePreference ?? "Not specified";
 
-    let prompt = `
-    You are a professional colour analyst and fashion stylist.
-    Analyze the user's profile and the provided image (if any) to provide a strict JSON response.
-    Do not include any chat conversational text or markdown formatting outside the JSON.
-    
-    The JSON structure must be exactly (return ONLY valid JSON):
+    const prompt = `
+You are a professional colour analyst and fashion stylist. Analyze the provided image and user profile to determine their seasonal color palette and styling recommendations.
+
+Return ONLY a valid JSON object with the exact following structure. Do not include markdown formatting like \`\`\`json.
+{
+  "skinTone": "string (Detected skin tone)",
+  "undertone": "string (Detected undertone, e.g., Warm, Cool, Neutral)",
+  "contrastLevel": "string (e.g. High, Medium, Low)",
+  "colorSeason": "string (e.g., True Autumn, Clear Winter)",
+  "colorSeasonConfidence": "number (0-100 representing confidence score)",
+  "summaryExplanation": "string (A short paragraph explaining why this season and these colors work for them)",
+  "bestNeutrals": ["string (hex code or color name)", "string", "string"],
+  "bestAccentColors": ["string (hex code or color name)", "string", "string"],
+  "avoidColors": ["string (hex code or color name)", "string", "string"],
+  "jewelry": {
+    "recommended": "string (e.g., Gold, Silver, Rose Gold)",
+    "avoid": "string",
+    "reason": "string (Why this metal works best for their undertone)"
+  },
+  "necklines": {
+    "recommended": ["string", "string"],
+    "avoid": ["string", "string"],
+    "reason": "string (Why these necklines suit their body type)"
+  },
+  "outfits": [
     {
-      "undertone": "String (e.g., Warm, Cool, Neutral)",
-      "contrastLevel": "String (e.g., Low, Medium, High)",
-      "faceShape": "String (e.g., Oval, Round, Square, Heart, Diamond, Oblong)",
-      "colorSeason": "String (e.g., Autumn, Winter, Spring, Summer)",
-      "summaryExplanation": "String (2-3 sentences explaining the analysis)",
-      "bestNeutrals": [{ "name": "String", "hex": "String" } (3 items)],
-      "bestAccentColors": [{ "name": "String", "hex": "String" } (4 items)],
-      "avoidColors": [{ "name": "String", "hex": "String" } (3 items)],
-      "jewelry": {
-        "recommended": "String",
-        "avoid": "String",
-        "reason": "String"
-      },
-      "necklines": {
-        "recommended": ["String", "String", "String"],
-        "avoid": ["String", "String"],
-        "reason": "String"
-      }
+      "id": "string (unique id)",
+      "description": "string (e.g., Navy shirt + camel trousers)",
+      "occasion": "string",
+      "style": "string",
+      "link": "string (A placeholder realistic URL for buying this or similar outfit)"
     }
+  ]
+}
 
-    User Profile:
-    Gender: ${gender ?? "Not specified"}
-    Skin Tone: ${skinTone ?? "Not specified"}
-    Hair Color: ${hairColor ?? "Not specified"}
-    Eye Color: ${eyeColor ?? "Not specified"}
-    Style Preference: ${stylePreference ?? "Not specified"}
-    Occasion: ${occasion ?? "Not specified"}
-    Body Type: ${bodyType ?? "Not specified"}
-    Undertone (User Input): ${undertone ?? "Not specified"}
-    Contrast Level (User Input): ${contrastLevel ?? "Not specified"}
-    `;
+User Profile:
+Gender: ${gender ?? "Not specified"}
+Skin Tone: ${safeSkinTone}
+Hair Color: ${hairColor ?? "Not specified"}
+Eye Color: ${eyeColor ?? "Not specified"}
+Style Preference: ${safeStyle}
+Occasion: ${occasion ?? "Not specified"}
+Body Type: ${safeBodyType}
+Undertone: ${safeUndertone}
+Contrast Level: ${safeContrast}
+`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${process.env.GEMINI_API_KEY}`;
-
-    // Gemini Vision REST format (NOT deprecated)
     const geminiPayload = {
       contents: [
         {
           parts: [
-            { text: prompt.trim() },
+            { text: prompt },
             {
               inline_data: {
                 mime_type: parsedImage.mimeType,
-                data: parsedImage.data,
-              },
-            },
-          ],
-        },
-      ],
+                data: parsedImage.data
+              }
+            }
+          ]
+        }
+      ]
     };
 
-    console.log("[/analyze-style] POST", url.split("?")[0]);
+    let geminiResponse;
+    let successfulModel = null;
+    let lastErrorData = null;
+    let lastStatus = 500;
 
-    const geminiResponse = await axios.post(url, geminiPayload, {
-      timeout: 90_000,
-      headers: { "Content-Type": "application/json" },
-      // Axios in Node can otherwise choke on big payloads
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      validateStatus: () => true,
-    });
+    for (const modelName of GEMINI_MODELS_TO_TRY) {
+      console.log("Calling Gemini model:", modelName);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
-    if (geminiResponse.status >= 400) {
-      console.error("[/analyze-style] Gemini HTTP error", geminiResponse.status);
-      console.error("[/analyze-style] Gemini error body:", JSON.stringify(geminiResponse.data).slice(0, 4000));
+      geminiResponse = await callGemini(url, geminiPayload);
+
+      if (geminiResponse.status < 400) {
+        successfulModel = modelName;
+        break;
+      } else {
+        console.warn(`Model ${modelName} failed with status ${geminiResponse.status}`);
+        lastErrorData = geminiResponse.data;
+        lastStatus = geminiResponse.status;
+      }
+    }
+
+    if (!successfulModel) {
+      console.error("Gemini error:", lastErrorData);
+
       return res.status(502).json({
         error: "Gemini API error",
-        upstreamStatus: geminiResponse.status,
-        upstreamBody: geminiResponse.data,
+        upstreamStatus: lastStatus,
+        upstreamBody: lastErrorData
       });
     }
 
     const modelText =
-      geminiResponse.data?.candidates?.[0]?.content?.parts?.find((p) => typeof p?.text === "string")?.text ??
-      geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-      "";
+      geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
     if (!modelText) {
-      console.error("[/analyze-style] No text returned from Gemini");
-      console.error("[/analyze-style] Full Gemini body:", JSON.stringify(geminiResponse.data).slice(0, 4000));
       return res.status(502).json({
-        error: "Gemini returned no text content",
-        upstreamBody: geminiResponse.data,
+        error: "Gemini returned empty response"
       });
     }
 
     const parsed = tryParseJsonFromText(modelText);
+
     if (!parsed.ok) {
-      // Do NOT crash by JSON.parse'ing blindly; return raw text + parsing hint.
-      console.error("[/analyze-style] Model output was not valid JSON:", parsed.error);
-      console.error("[/analyze-style] Model output (first 2000 chars):", modelText.slice(0, 2000));
       return res.status(502).json({
-        error: "Model did not return valid JSON",
-        parseError: parsed.error,
-        rawText: modelText,
+        error: "Gemini output not valid JSON",
+        rawText: modelText
       });
     }
 
     const analysis = parsed.value;
 
-    // Static outfits placeholder as requested
-    analysis.outfits = [
-      {
-        id: '1',
-        title: 'Classic Analysis Outfit 1',
-        price: '$--',
-        image: 'https://via.placeholder.com/300x400?text=Outfit+1',
-        link: 'https://example.com',
-        reason: 'Matches your color season.',
-      },
-      {
-        id: '2',
-        title: 'Classic Analysis Outfit 2',
-        price: '$--',
-        image: 'https://via.placeholder.com/300x400?text=Outfit+2',
-        link: 'https://example.com',
-        reason: 'Matches your body type.',
+    if (process.env.GROQ_API_KEY) {
+
+      try {
+
+        const groqResponse = await axios.post(
+          "https://api.groq.com/openai/v1/chat/completions",
+          {
+            model: GROQ_MODEL,
+            messages: [
+              {
+                role: "system",
+                content: "You are a professional fashion stylist. Based on the user's color analysis JSON, generate 3 specific, highly tailored outfit improvement recommendations.\nReturn ONLY a valid JSON object with the following structure. Do not include markdown formatting:\n{\n  \"recommendations\": [\n    \"string (recommendation 1)\",\n    \"string (recommendation 2)\",\n    \"string (recommendation 3)\"\n  ]\n}"
+              },
+              {
+                role: "user",
+                content: JSON.stringify(analysis)
+              }
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.7
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+              "Content-Type": "application/json"
+            },
+            validateStatus: () => true
+          }
+        );
+
+        const groqText =
+          groqResponse.data?.choices?.[0]?.message?.content ?? "";
+
+        const groqParsed = tryParseJsonFromText(groqText);
+
+        if (groqParsed.ok && groqParsed.value?.recommendations) {
+          analysis.recommendations = groqParsed.value.recommendations;
+        }
+
+      } catch (e) {
+        console.error("Groq failed:", e.message);
       }
-    ];
+
+    }
 
     res.json(analysis);
 
   } catch (error) {
-    console.error("[/analyze-style] Unhandled error:", error);
-    console.error("[/analyze-style] message:", error?.message);
-    console.error("[/analyze-style] stack:", error?.stack);
-    if (error?.response) {
-      console.error("[/analyze-style] axios response status:", error.response.status);
-      console.error("[/analyze-style] axios response data:", JSON.stringify(error.response.data).slice(0, 4000));
-    }
+
+    console.error("Unhandled error:", error);
+
     res.status(500).json({
       error: "Failed to analyze style",
-      details: error?.message ?? String(error),
+      details: error.message
     });
+
   }
 });
 
@@ -250,4 +320,3 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("UNHANDLED REJECTION:", reason);
 });
-

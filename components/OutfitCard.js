@@ -1,26 +1,27 @@
-import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
-const OutfitCard = ({ outfit, onBuyPress }) => {
+const OutfitCard = ({ outfit, index, onBuyPress }) => {
   return (
     <View style={styles.card}>
       <Image
-        source={{ uri: outfit.image }}
+        source={{ uri: outfit.image || 'https://via.placeholder.com/300x400?text=Outfit+Idea' }}
         style={styles.image}
       />
       <View style={styles.content}>
-        <Text style={styles.title}>{outfit.title}</Text>
-        <Text style={styles.reason}>{outfit.reason}</Text>
+        <Text style={styles.title}>Outfit #{index + 1}: {outfit.style || 'Everyday Wear'}</Text>
+        <Text style={styles.reason}>{outfit.description}</Text>
+        <Text style={styles.occasion}>Ideal for: {outfit.occasion}</Text>
         <View style={styles.footer}>
-          <Text style={styles.price}>{outfit.price}</Text>
+          {/* If price is placeholder or empty, don't show or show differently */}
+          <Text style={styles.price}>{outfit.price && outfit.price !== '$--' ? outfit.price : ''}</Text>
           <TouchableOpacity style={styles.buyButton} onPress={onBuyPress}>
-            <Text style={styles.buyButtonText}>Buy Now</Text>
+            <Text style={styles.buyButtonText}>Shop Similar</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -34,6 +35,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#eee',
   },
   image: {
     width: '100%',
@@ -50,9 +53,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   reason: {
+    fontSize: 14,
+    color: '#444',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  occasion: {
     fontSize: 13,
-    color: '#666',
-    lineHeight: 18,
+    color: '#888',
+    fontStyle: 'italic',
     marginBottom: 12,
   },
   footer: {

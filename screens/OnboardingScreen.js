@@ -38,9 +38,9 @@ const OnboardingScreen = ({ navigation }) => {
 
   const options = {
     gender: ['Male', 'Female', 'Non-binary', 'Other'],
-    bodyType: ['Pear', 'Hourglass', 'Rectangle', 'Apple', 'Athletic', 'Inverted Triangle', 'Petite', 'Plus Size', 'Other', 'Let AI Detect'],
+    bodyType: ['Pear', 'Hourglass', 'Rectangle', 'Apple', 'Athletic', 'Inverted Triangle', 'Petite', 'Plus Size', 'Other'],
     occasion: ['Casual', 'Formal', 'Business Casual', 'Date Night', 'Workout', 'Wedding Guest', 'Cocktail', 'Festival', 'Gala', 'Vacation', 'Other'],
-    stylePreference: ['Minimalist', 'Streetwear', 'Bohemian', 'Old Money', 'Preppy', 'Grunge', 'Y2K', 'Vintage', 'Avant-Garde', 'Cottagecore', 'Dark Academia', 'Other', 'Let AI Recommend'],
+    stylePreference: ['Minimalist', 'Streetwear', 'Bohemian', 'Old Money', 'Preppy', 'Grunge', 'Y2K', 'Vintage', 'Avant-Garde', 'Cottagecore', 'Dark Academia', 'Other'],
     skinTone: ['Very Fair', 'Fair', 'Medium', 'Olive', 'Tan', 'Deep', 'Rich', 'Other'],
     contrastLevel: ['Low', 'Medium', 'High', 'Let AI Detect'],
     undertone: ['Warm', 'Cool', 'Neutral', 'Olive', 'Let AI Detect'],

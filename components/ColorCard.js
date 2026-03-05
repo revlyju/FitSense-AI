@@ -12,6 +12,9 @@ const ColorCard = ({ color }) => {
       <View style={styles.textContainer}>
         <Text style={styles.colorName}>{color.name}</Text>
         <Text style={styles.colorHex}>{color.hex}</Text>
+        {color.reason ? (
+          <Text style={styles.colorReason}>{color.reason}</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -47,6 +50,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#999',
     fontFamily: 'Courier New',
+  },
+  colorReason: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
 });
 

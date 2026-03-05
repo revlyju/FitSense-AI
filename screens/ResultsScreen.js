@@ -1,18 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  FlatList,
-  Share,
   Alert,
+  FlatList,
   Linking,
-  Image,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import ColorCard from '../components/ColorCard';
 import OutfitCard from '../components/OutfitCard';
+
+function normalizeColorList(list) {
+  if (!Array.isArray(list)) return [];
+
+  return list
+    .map((item) => {
+      if (!item) return null;
+
+      if (typeof item === 'string') {
+        const hexMatch = item.match(/#(?:[0-9a-fA-F]{3}){1,2}/);
+        const hex = hexMatch ? hexMatch[0] : undefined;
+        const nameText = hexMatch ? item.replace(hexMatch[0], '').trim() : item.trim();
+
+        return {
+          name: nameText || hex || item,
+          hex: hex || (item.startsWith('#') ? item : '#000000'),
+          reason: '',
+        };
+      }
+
+      if (typeof item === 'object') {
+        const hex = item.hex || item.color || item.value;
+        return {
+          name: item.name || item.label || item.color || hex || 'Color',
+          hex: hex || '#000000',
+          reason: item.reason || '',
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+}
 
 const ResultsScreen = ({ navigation, route }) => {
   const analysisResults = route?.params?.analysisResults;
@@ -29,6 +61,28 @@ const ResultsScreen = ({ navigation, route }) => {
     return null;
   }
 
+  const jewelry = analysisResults.jewelry || {
+    recommended: 'Not specified',
+    avoid: 'Not specified',
+    reason: '',
+  };
+
+  const necklines = analysisResults.necklines || {
+    recommended: [],
+    avoid: [],
+    reason: '',
+  };
+
+  const bestNeutrals = normalizeColorList(analysisResults.bestNeutrals);
+
+  const bestAccentColors = normalizeColorList(analysisResults.bestAccentColors);
+
+  const avoidColors = normalizeColorList(analysisResults.avoidColors);
+
+  const outfits = Array.isArray(analysisResults.outfits)
+    ? analysisResults.outfits
+    : [];
+
   const handleSaveLook = () => {
     setSavedLooks([...savedLooks, analysisResults]);
     Alert.alert('Saved', 'This look has been saved!');
@@ -37,7 +91,7 @@ const ResultsScreen = ({ navigation, route }) => {
   const handleShareLook = async () => {
     try {
       await Share.share({
-        message: `Check out my AI-generated style profile! Color Season: ${analysisResults.colorSeason}, Recommended metals: ${analysisResults.jewelry.recommended}`,
+        message: `Check out my AI-generated style profile! Color Season: ${analysisResults.colorSeason}, Recommended metals: ${jewelry.recommended}`,
         title: 'AI Stylist Profile',
       });
     } catch (error) {
@@ -79,7 +133,12 @@ const ResultsScreen = ({ navigation, route }) => {
           <View style={styles.summaryDivider} />
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Color Season</Text>
-            <Text style={styles.summaryValue}>{analysisResults.colorSeason}</Text>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={styles.summaryValue}>{analysisResults.colorSeason}</Text>
+              {analysisResults.colorSeasonConfidence ? (
+                <Text style={styles.confidenceText}>Confidence: {analysisResults.colorSeasonConfidence}%</Text>
+              ) : null}
+            </View>
           </View>
           <View style={styles.summaryDivider} />
           <Text style={styles.summaryText}>{analysisResults.summaryExplanation}</Text>
@@ -91,21 +150,21 @@ const ResultsScreen = ({ navigation, route }) => {
 
         <View style={styles.colorSubsection}>
           <Text style={styles.colorSubtitle}>Best Neutrals</Text>
-          {analysisResults.bestNeutrals.map((color, idx) => (
+          {bestNeutrals.map((color, idx) => (
             <ColorCard key={idx} color={color} />
           ))}
         </View>
 
         <View style={styles.colorSubsection}>
           <Text style={styles.colorSubtitle}>Best Accent Colors</Text>
-          {analysisResults.bestAccentColors.map((color, idx) => (
+          {bestAccentColors.map((color, idx) => (
             <ColorCard key={idx} color={color} />
           ))}
         </View>
 
         <View style={styles.colorSubsection}>
           <Text style={styles.colorSubtitle}>Colors To Avoid</Text>
-          {analysisResults.avoidColors.map((color, idx) => (
+          {avoidColors.map((color, idx) => (
             <ColorCard key={idx} color={color} />
           ))}
         </View>
@@ -116,26 +175,26 @@ const ResultsScreen = ({ navigation, route }) => {
         <View style={styles.jewelryCard}>
           <View style={styles.jewelryRow}>
             <Text style={styles.jewelryLabel}>Recommended Metal</Text>
-            <Text style={styles.jewelryValue}>{analysisResults.jewelry.recommended}</Text>
+            <Text style={styles.jewelryValue}>{jewelry.recommended}</Text>
           </View>
           <View style={styles.jewelryDivider} />
           <View style={styles.jewelryRow}>
             <Text style={styles.jewelryLabel}>Metal to Avoid</Text>
-            <Text style={styles.jewelryValue}>{analysisResults.jewelry.avoid}</Text>
+            <Text style={styles.jewelryValue}>{jewelry.avoid}</Text>
           </View>
           <View style={styles.jewelryDivider} />
-          <Text style={styles.jewelryReason}>{analysisResults.jewelry.reason}</Text>
+          <Text style={styles.jewelryReason}>{jewelry.reason}</Text>
         </View>
       </View>
 
-      {analysisResults.necklines && (
+      {necklines && (
         <View style={styles.necklinesSection}>
           <Text style={styles.sectionTitle}>Neckline Recommendations</Text>
           <View style={styles.necklinesCard}>
             <View style={styles.necklinesSubsection}>
               <Text style={styles.necklinesSubtitle}>Recommended Necklines</Text>
               <View style={styles.necklinesTagContainer}>
-                {analysisResults.necklines.recommended.map((neckline, idx) => (
+                {necklines.recommended.map((neckline, idx) => (
                   <View key={idx} style={styles.tag}>
                     <Text style={styles.tagText}>{neckline}</Text>
                   </View>
@@ -146,7 +205,7 @@ const ResultsScreen = ({ navigation, route }) => {
             <View style={styles.necklinesSubsection}>
               <Text style={styles.necklinesSubtitle}>Necklines to Avoid</Text>
               <View style={styles.necklinesTagContainer}>
-                {analysisResults.necklines.avoid.map((neckline, idx) => (
+                {necklines.avoid.map((neckline, idx) => (
                   <View key={idx} style={[styles.tag, styles.tagAvoid]}>
                     <Text style={[styles.tagText, styles.tagAvoidText]}>{neckline}</Text>
                   </View>
@@ -154,7 +213,7 @@ const ResultsScreen = ({ navigation, route }) => {
               </View>
             </View>
             <View style={styles.necklinesDivider} />
-            <Text style={styles.necklinesReason}>{analysisResults.necklines.reason}</Text>
+            <Text style={styles.necklinesReason}>{necklines.reason}</Text>
           </View>
         </View>
       )}
@@ -163,10 +222,10 @@ const ResultsScreen = ({ navigation, route }) => {
         <Text style={styles.sectionTitle}>Recommended Outfits</Text>
         <FlatList
           data={analysisResults.outfits}
-          keyExtractor={item => item.id}
+          keyExtractor={(item, index) => item.id || index.toString()}
           scrollEnabled={false}
-          renderItem={({ item }) => (
-            <OutfitCard outfit={item} onBuyPress={() => handleBuyNow(item.link)} />
+          renderItem={({ item, index }) => (
+            <OutfitCard index={index} outfit={item} onBuyPress={() => handleBuyNow(item.link || 'https://example.com/shop')} />
           )}
         />
       </View>
@@ -250,6 +309,12 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 20,
     marginTop: 8,
+  },
+  confidenceText: {
+    fontSize: 12,
+    color: '#2e7d32', // Green for positive/confidence
+    fontWeight: '600',
+    marginTop: 2,
   },
   colorsSection: {
     paddingHorizontal: 20,

@@ -4,10 +4,56 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+// Force Node.js to use Google's DNS servers for resolving the MongoDB SRV record
+// This fixes network issues where local ISPs block Node.js DNS queries.
+try {
+  require("dns").setServers(["8.8.8.8", "8.8.4.4"]);
+} catch (error) {
+  console.warn("Could not set DNS servers:", error);
+}
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "75mb" }));
+
+const uri = process.env.MONGODB_URI;
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(uri);
+    console.log("MongoDB connected");
+  } catch (err) {
+    console.error("MongoDB connection failed:", err);
+  }
+};
+
+connectDB();
+
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  passwordHash: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+});
+
+const User = mongoose.model("User", userSchema);
+
+const userStyleProfileSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", unique: true },
+  skinTone: String,
+  undertone: String,
+  contrastLevel: String,
+  season: String,
+  bestColors: [mongoose.Schema.Types.Mixed],
+  avoidColors: [mongoose.Schema.Types.Mixed],
+  metalPreference: String,
+  necklines: mongoose.Schema.Types.Mixed,
+  updatedAt: { type: Date, default: Date.now },
+});
+
+const UserStyleProfile = mongoose.model("UserStyleProfile", userStyleProfileSchema);
 
 const GEMINI_MODELS_TO_TRY = [
   process.env.GEMINI_MODEL,
@@ -20,6 +66,120 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+app.post("/signup", async (req, res) => {
+  try {
+    const { name, email, password } = req.body || {};
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "Name, email, and password are required" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+
+    const existing = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existing) {
+      return res.status(409).json({ error: "An account with this email already exists" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
+      name,
+      email: email.toLowerCase().trim(),
+      passwordHash,
+    });
+
+    return res.status(201).json({
+      success: true,
+      userId: user._id.toString(),
+      name: user.name,
+    });
+  } catch (err) {
+    console.error("Signup error:", err);
+    return res.status(500).json({ error: "Failed to create account" });
+  }
+});
+
+app.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    return res.json({
+      success: true,
+      userId: user._id.toString(),
+      name: user.name,
+    });
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).json({ error: "Failed to login" });
+  }
+});
+
+app.post("/style-profile", async (req, res) => {
+  try {
+    const {
+      userId,
+      skinTone,
+      undertone,
+      contrastLevel,
+      season,
+      bestColors,
+      avoidColors,
+      metalPreference,
+      necklines,
+    } = req.body || {};
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const profile = await UserStyleProfile.findOneAndUpdate(
+      { userId: user._id },
+      {
+        skinTone,
+        undertone,
+        contrastLevel,
+        season,
+        bestColors,
+        avoidColors,
+        metalPreference,
+        necklines,
+        updatedAt: new Date(),
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    return res.json({
+      success: true,
+      profile,
+    });
+  } catch (err) {
+    console.error("Style profile error:", err);
+    return res.status(500).json({ error: "Failed to save style profile" });
+  }
+});
 
 function parseImageBase64(input) {
   if (!input || typeof input !== "string") return null;
@@ -135,7 +295,14 @@ app.post("/analyze-style", async (req, res) => {
     const safeStyle = stylePreference ?? "Not specified";
 
     const prompt = `
-You are a professional colour analyst and fashion stylist. Analyze the provided image and user profile to determine their seasonal color palette and styling recommendations.
+You are an expert 12-season color analyst and fashion stylist. You MUST perform a rigorous and unbiased analysis of the provided image and user profile. 
+CRITICAL RULES:
+1. Do NOT default to "Autumn" or "Warm" blindly. Many users are Winter, Summer, or Spring.
+2. Distinctly evaluate the contrast (High/Medium/Low) between skin, hair, and eyes.
+3. Precisely determine undertone (Cool, Warm, Neutral, Olive).
+4. Assign the EXACT 12-season category (e.g., Light Spring, Soft Summer, True Winter, Dark Autumn).
+5. Ensure color recommendations are extremely personalized to their specific season. Avoid generic colors.
+6. Jewelry MUST match undertone strictly (Cool = Silver/White Gold; Warm = Gold/Brass; Neutral = Rose Gold/Mixed).
 
 Return ONLY a valid JSON object with the exact following structure. Do not include markdown formatting like \`\`\`json.
 {
@@ -145,9 +312,27 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
   "colorSeason": "string (e.g., True Autumn, Clear Winter)",
   "colorSeasonConfidence": "number (0-100 representing confidence score)",
   "summaryExplanation": "string (A short paragraph explaining why this season and these colors work for them)",
-  "bestNeutrals": ["string (hex code or color name)", "string", "string"],
-  "bestAccentColors": ["string (hex code or color name)", "string", "string"],
-  "avoidColors": ["string (hex code or color name)", "string", "string"],
+  "bestNeutrals": [
+    { "name": "string (color name)", "hex": "string (hex code)" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" }
+  ],
+  "bestAccentColors": [
+    { "name": "string (color name)", "hex": "string (hex code)" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" }
+  ],
+  "avoidColors": [
+    { "name": "string (color name)", "hex": "string (hex code)" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" },
+    { "name": "string", "hex": "string" }
+  ],
   "jewelry": {
     "recommended": "string (e.g., Gold, Silver, Rose Gold)",
     "avoid": "string",

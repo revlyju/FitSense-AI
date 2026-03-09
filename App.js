@@ -1,12 +1,14 @@
-import 'react-native-gesture-handler';
-import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet } from 'react-native';
-import OnboardingScreen from './screens/OnboardingScreen';
+import 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import AuthScreen from './screens/AuthScreen';
+import LandingScreen from './screens/LandingScreen';
 import LoadingScreen from './screens/LoadingScreen';
+import MainDrawer from './screens/MainDrawer';
+import OnboardingScreen from './screens/OnboardingScreen';
 import ResultsScreen from './screens/ResultsScreen';
 
 const Stack = createNativeStackNavigator();
@@ -16,14 +18,18 @@ export default function App() {
     <GestureHandlerRootView style={styles.container}>
       <NavigationContainer>
         <Stack.Navigator
+          initialRouteName="Landing"
           screenOptions={{
             headerShown: false,
             animationEnabled: true,
           }}
         >
+          <Stack.Screen name="Landing" component={LandingScreen} />
+          <Stack.Screen name="Auth" component={AuthScreen} />
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           <Stack.Screen name="Loading" component={LoadingScreen} />
           <Stack.Screen name="Results" component={ResultsScreen} />
+          <Stack.Screen name="Main" component={MainDrawer} />
         </Stack.Navigator>
         <StatusBar barStyle="dark-content" />
       </NavigationContainer>

@@ -16,7 +16,8 @@ import {
 } from 'react-native';
 import SelectionButton from '../components/SelectionButton';
 
-const OnboardingScreen = ({ navigation }) => {
+const OnboardingScreen = ({ navigation, route }) => {
+  const userId = route?.params?.userId ?? null;
   const [selections, setSelections] = useState({
     gender: null,
     bodyType: null,
@@ -128,9 +129,9 @@ const OnboardingScreen = ({ navigation }) => {
     }
 
     setLoading(true);
-    // Simulate navigation or actual logic
     navigation.navigate('Loading', {
-      userPreferences: { ...selections, image: imageBase64, imageUri: image }, // Pass base64 for backend, uri for potential display
+      userPreferences: { ...selections, image: imageBase64, imageUri: image },
+      userId,
     });
   };
   // -------------------

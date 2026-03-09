@@ -1,14 +1,11 @@
 import axios from 'axios';
 import { useEffect } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
-
-// API endpoint - change this to your backend URL
-// For local development, use: 'http://localhost:5000/analyze-style'
-// For same network device, use your computer's IP: 'http://YOUR_IP:5000/analyze-style'
-const API_BASE_URL = 'http://10.225.140.228:5000'; // Production - use your server IP
+import { API_BASE_URL } from '../config';
 
 const LoadingScreen = ({ navigation, route }) => {
   const userPreferences = route?.params?.userPreferences;
+  const userId = route?.params?.userId ?? null;
 
   useEffect(() => {
     if (!userPreferences) {
@@ -47,9 +44,28 @@ const LoadingScreen = ({ navigation, route }) => {
           throw new Error(response.data.error);
         }
 
+        if (userId) {
+          try {
+            await axios.post(`${API_BASE_URL}/style-profile`, {
+              userId,
+              skinTone: response.data.skinTone,
+              undertone: response.data.undertone,
+              contrastLevel: response.data.contrastLevel,
+              season: response.data.colorSeason,
+              bestColors: response.data.bestNeutrals,
+              avoidColors: response.data.avoidColors,
+              metalPreference: response.data.jewelry?.recommended,
+              necklines: response.data.necklines,
+            });
+          } catch (e) {
+            console.error('Failed to save style profile', e?.response?.data || e.message);
+          }
+        }
+
         navigation.replace('Results', {
           analysisResults: response.data,
           userPreferences,
+          userId,
         });
       } catch (error) {
         console.error('Analysis error:', error);

@@ -20,12 +20,14 @@ const OnboardingScreen = ({ navigation, route }) => {
   const userId = route?.params?.userId ?? null;
   const [selections, setSelections] = useState({
     gender: null,
-    bodyType: null,
     occasion: null,
+    seasonOrWeather: null,
+    locationClimate: null,
+    timeOfDay: null,
+    activityLevel: null,
     stylePreference: null,
-    skinTone: null,
-    contrastLevel: null,
-    undertone: null,
+    colorPreference: null,
+    fitPreference: null,
   });
 
   const [image, setImage] = useState(null);
@@ -38,13 +40,15 @@ const OnboardingScreen = ({ navigation, route }) => {
   const lastPickerTapMsRef = useRef({});
 
   const options = {
-    gender: ['Male', 'Female', 'Non-binary', 'Other'],
-    bodyType: ['Pear', 'Hourglass', 'Rectangle', 'Apple', 'Athletic', 'Inverted Triangle', 'Petite', 'Plus Size', 'Other'],
-    occasion: ['Casual', 'Formal', 'Business Casual', 'Date Night', 'Workout', 'Wedding Guest', 'Cocktail', 'Festival', 'Gala', 'Vacation', 'Other'],
-    stylePreference: ['Minimalist', 'Streetwear', 'Bohemian', 'Old Money', 'Preppy', 'Grunge', 'Y2K', 'Vintage', 'Avant-Garde', 'Cottagecore', 'Dark Academia', 'Other'],
-    skinTone: ['Very Fair', 'Fair', 'Medium', 'Olive', 'Tan', 'Deep', 'Rich', 'Other'],
-    contrastLevel: ['Low', 'Medium', 'High', 'Let AI Detect'],
-    undertone: ['Warm', 'Cool', 'Neutral', 'Olive', 'Let AI Detect'],
+    gender: ['Male', 'Female', 'Non-binary', 'No Preference', 'Other'],
+    occasion: ['Casual', 'Work', 'Date', 'Party', 'Travel', 'Formal', 'Workout', 'No Preference', 'Other'],
+    seasonOrWeather: ['Spring', 'Summer', 'Autumn', 'Winter', 'Hot/Sunny', 'Rainy', 'Cold/Snowy', 'No Preference', 'Other'],
+    locationClimate: ['Indoor (AC)', 'Indoor (Heated)', 'Outdoor (Humid)', 'Outdoor (Dry)', 'No Preference', 'Other'],
+    timeOfDay: ['Morning', 'Afternoon', 'Evening', 'Night', 'No Preference'],
+    activityLevel: ['Low (Sitting)', 'Moderate (Walking)', 'High (Active)', 'No Preference'],
+    stylePreference: ['Minimal', 'Streetwear', 'Elegant', 'Romantic', 'Vintage', 'Edgy', 'Bohemian', 'Preppy', 'No Preference', 'Other'],
+    colorPreference: ['Neutrals', 'Pastels', 'Bright Colors', 'Dark Tones', 'Earth Tones', 'No Preference', 'Other'],
+    fitPreference: ['Loose', 'Regular', 'Fitted', 'Oversized', 'No Preference', 'Other']
   };
 
   const updateSelection = (field, value) => {
@@ -63,12 +67,14 @@ const OnboardingScreen = ({ navigation, route }) => {
   const resetAll = () => {
     setSelections({
       gender: null,
-      bodyType: null,
       occasion: null,
+      seasonOrWeather: null,
+      locationClimate: null,
+      timeOfDay: null,
+      activityLevel: null,
       stylePreference: null,
-      skinTone: null,
-      contrastLevel: null,
-      undertone: null,
+      colorPreference: null,
+      fitPreference: null,
     });
     setImage(null);
     setImageBase64(null);
@@ -114,16 +120,23 @@ const OnboardingScreen = ({ navigation, route }) => {
 
   // --- FIXED LOGIC ---
   const handleAnalyze = () => {
-    // Check if any field is null/undefined OR is still the literal string "Other"
-    const missingFields = Object.keys(selections).filter(key => {
-      const val = selections[key];
-      return !val || val === 'Other';
+    // Check if any filled field is still the literal string "Other"
+    const hasUnfilledOther = Object.keys(selections).some(key => {
+      return selections[key] === 'Other';
     });
 
-    if (missingFields.length > 0 || !image) {
+    if (!image) {
       Alert.alert(
-        'Missing Information',
-        'Please ensure all categories are selected. If you chose "Other", please type your specific preference.'
+        'Missing Photo',
+        'Please upload a photo for analysis. (All other fields are optional)'
+      );
+      return;
+    }
+
+    if (hasUnfilledOther) {
+      Alert.alert(
+        'Incomplete Fields',
+        'Please type your specific preference for the fields where you selected "Other".'
       );
       return;
     }
@@ -190,12 +203,14 @@ const OnboardingScreen = ({ navigation, route }) => {
         </View>
 
         {renderGridSection('Gender', 'gender')}
-        {renderGridSection('Body Type', 'bodyType')}
         {renderPickerSection('Occasion', 'occasion')}
-        {renderPickerSection('Style Aesthetic', 'stylePreference')}
-        {renderGridSection('Skin Tone', 'skinTone')}
-        {renderGridSection('Contrast Level', 'contrastLevel')}
-        {renderGridSection('Undertone', 'undertone')}
+        {renderPickerSection('Season & Weather', 'seasonOrWeather')}
+        {renderPickerSection('Location Climate', 'locationClimate')}
+        {renderPickerSection('Time of Day', 'timeOfDay')}
+        {renderPickerSection('Activity Level', 'activityLevel')}
+        {renderPickerSection('Style Preference', 'stylePreference')}
+        {renderPickerSection('Color Preference', 'colorPreference')}
+        {renderPickerSection('Fit Preference', 'fitPreference')}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Upload Your Photo</Text>

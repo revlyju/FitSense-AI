@@ -20,14 +20,19 @@ const LoadingScreen = ({ navigation, route }) => {
         console.log("Image length:", userPreferences.image?.length || 0);
 
         // Prepare the request payload
+        const rawGender = (userPreferences.gender || '').toString().toLowerCase();
+        const userGender = rawGender.includes('female') ? 'women' : 'men';
         const payload = {
           gender: userPreferences.gender,
-          skinTone: userPreferences.skinTone,
-          stylePreference: userPreferences.stylePreference,
+          userGender,
           occasion: userPreferences.occasion,
-          bodyType: userPreferences.bodyType,
-          contrastLevel: userPreferences.contrastLevel,
-          undertone: userPreferences.undertone,
+          seasonOrWeather: userPreferences.seasonOrWeather,
+          locationClimate: userPreferences.locationClimate,
+          timeOfDay: userPreferences.timeOfDay,
+          activityLevel: userPreferences.activityLevel,
+          stylePreference: userPreferences.stylePreference,
+          colorPreference: userPreferences.colorPreference,
+          fitPreference: userPreferences.fitPreference,
           image: userPreferences.image, // base64 string
         };
 

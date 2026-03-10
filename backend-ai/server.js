@@ -6,6 +6,7 @@ const cors = require("cors");
 const axios = require("axios");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const path = require("path");
 // Force Node.js to use Google's DNS servers for resolving the MongoDB SRV record
 // This fixes network issues where local ISPs block Node.js DNS queries.
 try {
@@ -17,6 +18,9 @@ try {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "75mb" }));
+
+// Serve static outfit images from the outfit_img folder
+app.use("/outfit_img", express.static(path.join(__dirname, "outfit_img")));
 
 const uri = process.env.MONGODB_URI;
 
@@ -54,6 +58,28 @@ const userStyleProfileSchema = new mongoose.Schema({
 });
 
 const UserStyleProfile = mongoose.model("UserStyleProfile", userStyleProfileSchema);
+
+const outfitsDb = mongoose.connection.useDb('outfits');
+const outfitSchema = new mongoose.Schema({
+  id: String,
+  gender: [String],
+  type: String,
+  category: String,
+  imageUrl: String,
+  suitable_body_types: [String],
+  suitable_body_type: [String],
+  seasons: [String],
+  weather: [String],
+  necklines: [String],
+  patterns: [String],
+  colors: [String],
+  fit: String,
+  fabric: [String],
+  style_tags: [String],
+  occasion: String,
+  link: String
+});
+const Outfit = outfitsDb.model("Outfit", outfitSchema, "outfits");
 
 const GEMINI_MODELS_TO_TRY = [
   process.env.GEMINI_MODEL,
@@ -215,11 +241,19 @@ function tryParseJsonFromText(text) {
     return { ok: false, value: null, error: "No JSON object found in model output" };
   }
 
-  const slice = text.slice(start).trim();
+  const lastBrace = text.lastIndexOf("}");
+  const lastBracket = text.lastIndexOf("]");
+  const end = Math.max(lastBrace, lastBracket);
+
+  if (end === -1 || end < start) {
+    return { ok: false, value: null, error: "No closing JSON bracket found" };
+  }
+
+  const slice = text.slice(start, end + 1).trim();
   try {
     return { ok: true, value: JSON.parse(slice) };
   } catch (e) {
-    return { ok: false, value: null, error: `JSON parse failed: ${e.message}` };
+    return { ok: false, value: null, error: `JSON parse failed: ${e.message}`, rawText: text };
   }
 }
 
@@ -255,6 +289,75 @@ async function callGemini(url, payload) {
   return lastResponse;
 }
 
+// outfit scorer
+function calculateOutfitScore(outfit, userProfile) {
+  let score = 0;
+  let reasons = [];
+
+  const { gender, bodyShape, colorSeason, necklines, occasion, seasonOrWeather, stylePreference, colorPreference, fitPreference } = userProfile;
+
+  // Gender is filtered BEFORE scoring (see filteredOutfits logic below).
+  // We keep scoring logic gender-agnostic to avoid wasting compute and to guarantee
+  // the frontend never receives mismatched outfits.
+
+  // Body type match -> +3
+  const userBodyShape = (bodyShape || "").toLowerCase();
+  const dbBodyTypes = outfit.suitable_body_types || outfit.suitable_body_type || [];
+  if (userBodyShape && dbBodyTypes.some(bt => userBodyShape.includes(bt.toLowerCase()) || bt.toLowerCase().includes(userBodyShape))) {
+    score += 3;
+    reasons.push("flatters your body type");
+  }
+
+  // Season match -> +2
+  const userSeason = (seasonOrWeather || colorSeason || "").toLowerCase();
+  const dbSeasons = outfit.seasons || outfit.weather || [];
+  if (userSeason && dbSeasons.some(s => userSeason.includes(s.toLowerCase()) || s.toLowerCase().includes(userSeason) ||
+    (userSeason.includes("summer") && s.toLowerCase().includes("hot")) ||
+    (userSeason.includes("winter") && s.toLowerCase().includes("cold")))) {
+    score += 2;
+    reasons.push("perfect for the season/weather");
+  }
+
+  // Occasion match -> +2
+  const userOccasion = (occasion || "").toLowerCase();
+  if (userOccasion && outfit.occasion && outfit.occasion.toLowerCase().includes(userOccasion)) {
+    score += 2;
+    reasons.push("matches your occasion");
+  }
+
+  // Style preference match -> +1
+  const userStyle = (stylePreference || "").toLowerCase();
+  const dbStyles = outfit.style_tags || [];
+  if (userStyle && dbStyles.some(st => st.toLowerCase().includes(userStyle) || userStyle.includes(st.toLowerCase()))) {
+    score += 1;
+    reasons.push("fits your style preference");
+  }
+
+  // Color preference match -> +1
+  const userColor = (colorPreference || "").toLowerCase();
+  const dbColors = outfit.colors || [];
+  if (userColor && dbColors.some(c => userColor.includes(c.toLowerCase()) || c.toLowerCase().includes(userColor))) {
+    score += 1;
+    reasons.push("matches your color preference");
+  }
+
+  // Neckline match -> +1
+  const recommendedNecklines = (necklines?.recommended || []).map(n => n.toLowerCase());
+  const dbNecklines = outfit.necklines || [];
+  if (recommendedNecklines.length > 0 && dbNecklines.some(n => recommendedNecklines.some(rec => rec.includes(n.toLowerCase()) || n.toLowerCase().includes(rec)))) {
+    score += 1;
+    reasons.push("features a recommended neckline");
+  }
+
+  let reasonsString = reasons.length > 0 ? reasons.join(" and ") : "A great addition to your wardrobe";
+  if (reasonsString.length > 120) {
+    reasonsString = reasons.slice(0, 3).join(", ") + " and more";
+  }
+  reasonsString = reasonsString.charAt(0).toUpperCase() + reasonsString.slice(1) + ".";
+
+  return { score, matchReasons: reasonsString };
+}
+
 app.post("/analyze-style", async (req, res) => {
 
   try {
@@ -263,14 +366,14 @@ app.post("/analyze-style", async (req, res) => {
 
     let {
       gender,
-      skinTone,
-      hairColor,
-      stylePreference,
-      eyeColor,
       occasion,
-      bodyType,
-      contrastLevel,
-      undertone,
+      seasonOrWeather,
+      locationClimate,
+      timeOfDay,
+      activityLevel,
+      stylePreference,
+      colorPreference,
+      fitPreference,
       image,
     } = req.body || {};
 
@@ -288,14 +391,8 @@ app.post("/analyze-style", async (req, res) => {
       });
     }
 
-    const safeSkinTone = skinTone === "Let AI Detect" ? "Detect from image" : (skinTone ?? "Not specified");
-    const safeUndertone = undertone === "Let AI Detect" ? "Detect from image" : (undertone ?? "Not specified");
-    const safeContrast = contrastLevel === "Let AI Detect" ? "Detect from image" : (contrastLevel ?? "Not specified");
-    const safeBodyType = bodyType === "Let AI Detect" ? "Detect from image" : (bodyType ?? "Not specified");
-    const safeStyle = stylePreference ?? "Not specified";
-
     const prompt = `
-You are an expert 12-season color analyst and fashion stylist. You MUST perform a rigorous and unbiased analysis of the provided image and user profile. 
+You are an expert 12-season color analyst and fashion stylist. You MUST perform a rigorous and unbiased analysis of the provided image. 
 CRITICAL RULES:
 1. Do NOT default to "Autumn" or "Warm" blindly. Many users are Winter, Summer, or Spring.
 2. Distinctly evaluate the contrast (High/Medium/Low) between skin, hair, and eyes.
@@ -311,7 +408,8 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
   "contrastLevel": "string (e.g. High, Medium, Low)",
   "colorSeason": "string (e.g., True Autumn, Clear Winter)",
   "colorSeasonConfidence": "number (0-100 representing confidence score)",
-  "summaryExplanation": "string (A short paragraph explaining why this season and these colors work for them)",
+  "faceShape": "string (Detected face shape, e.g., Oval, Round, Square)",
+  "bodyShape": "string (Detected body shape, e.g., Hourglass, Pear)",
   "bestNeutrals": [
     { "name": "string (color name)", "hex": "string (hex code)" },
     { "name": "string", "hex": "string" },
@@ -342,28 +440,11 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
     "recommended": ["string", "string"],
     "avoid": ["string", "string"],
     "reason": "string (Why these necklines suit their body type)"
-  },
-  "outfits": [
-    {
-      "id": "string (unique id)",
-      "description": "string (e.g., Navy shirt + camel trousers)",
-      "occasion": "string",
-      "style": "string",
-      "link": "string (A placeholder realistic URL for buying this or similar outfit)"
-    }
-  ]
+  }
 }
 
-User Profile:
+User Profile Context:
 Gender: ${gender ?? "Not specified"}
-Skin Tone: ${safeSkinTone}
-Hair Color: ${hairColor ?? "Not specified"}
-Eye Color: ${eyeColor ?? "Not specified"}
-Style Preference: ${safeStyle}
-Occasion: ${occasion ?? "Not specified"}
-Body Type: ${safeBodyType}
-Undertone: ${safeUndertone}
-Contrast Level: ${safeContrast}
 `;
 
     const geminiPayload = {
@@ -379,7 +460,10 @@ Contrast Level: ${safeContrast}
             }
           ]
         }
-      ]
+      ],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
     };
 
     let geminiResponse;
@@ -427,6 +511,7 @@ Contrast Level: ${safeContrast}
     if (!parsed.ok) {
       return res.status(502).json({
         error: "Gemini output not valid JSON",
+        parseError: parsed.error,
         rawText: modelText
       });
     }
@@ -437,6 +522,47 @@ Contrast Level: ${safeContrast}
 
       try {
 
+        const rawContextualInputs = {
+          occasion,
+          seasonOrWeather,
+          locationClimate,
+          timeOfDay,
+          activityLevel,
+          stylePreference,
+          colorPreference,
+          fitPreference
+        };
+
+        const contextualInputs = Object.fromEntries(
+          Object.entries(rawContextualInputs).filter(([_, v]) => v && v !== 'No Preference')
+        );
+
+        const groqPrompt = `
+You are a professional fashion stylist. You have been provided with two pieces of information about a client:
+1. A visual style profile extracted by an AI image analyzer.
+2. The user's personal preferences and contextual details for what they want to wear.
+
+Your task is to:
+1. Generate a "summaryExplanation" (1-2 paragraphs) that explains their color season and how it works with their requested style/occasion.
+2. Generate exactly 3 highly specific outfit recommendations that perfectly combine their visual attributes (color season, body recommendations) with their requested preferences.
+
+Return ONLY a valid JSON object with the exact following structure. Do not include markdown formatting:
+{
+  "summaryExplanation": "string (Your personalized explanation)",
+  "outfits": [
+    {
+      "id": "outfit-1",
+      "description": "string (Detailed description of the pieces, colors, and why it works)",
+      "occasion": "string (The occasion this suits best or user matched)",
+      "style": "string (The aesthetic name)",
+      "link": "string (A placeholder realistic URL for buying this or similar outfit)"
+    },
+    { "id": "outfit-2", "description": "string", "occasion": "string", "style": "string", "link": "string" },
+    { "id": "outfit-3", "description": "string", "occasion": "string", "style": "string", "link": "string" }
+  ]
+}
+`;
+
         const groqResponse = await axios.post(
           "https://api.groq.com/openai/v1/chat/completions",
           {
@@ -444,11 +570,14 @@ Contrast Level: ${safeContrast}
             messages: [
               {
                 role: "system",
-                content: "You are a professional fashion stylist. Based on the user's color analysis JSON, generate 3 specific, highly tailored outfit improvement recommendations.\nReturn ONLY a valid JSON object with the following structure. Do not include markdown formatting:\n{\n  \"recommendations\": [\n    \"string (recommendation 1)\",\n    \"string (recommendation 2)\",\n    \"string (recommendation 3)\"\n  ]\n}"
+                content: groqPrompt
               },
               {
                 role: "user",
-                content: JSON.stringify(analysis)
+                content: JSON.stringify({
+                  visualProfile: analysis,
+                  userPreferences: contextualInputs
+                })
               }
             ],
             response_format: { type: "json_object" },
@@ -468,14 +597,72 @@ Contrast Level: ${safeContrast}
 
         const groqParsed = tryParseJsonFromText(groqText);
 
-        if (groqParsed.ok && groqParsed.value?.recommendations) {
-          analysis.recommendations = groqParsed.value.recommendations;
+        if (groqParsed.ok && groqParsed.value?.outfits) {
+          analysis.outfits = groqParsed.value.outfits;
+          analysis.summaryExplanation = groqParsed.value.summaryExplanation || "We've created these personalized outfits for you based on your analysis.";
         }
 
       } catch (e) {
         console.error("Groq failed:", e.message);
       }
 
+    }
+
+    // --- DB OUTFITS MATCHING LOGIC ---
+    try {
+      const dbOutfits = await Outfit.find({});
+      const rawUserGender = (req.body?.userGender || gender || "").toString().toLowerCase().trim();
+      const userGender = rawUserGender === "men" || rawUserGender === "women" ? rawUserGender : "";
+
+      const filteredOutfits = dbOutfits.filter((outfit) => {
+        const g = outfit?.gender;
+        // Defensive: missing gender => treat as unisex
+        const genders = Array.isArray(g) ? g : (typeof g === "string" ? [g] : []);
+        if (genders.length === 0) return true;
+
+        const normalized = genders.map((x) => (x || "").toString().toLowerCase().trim());
+        if (normalized.includes("unisex")) return true;
+        if (!userGender) return true;
+        return normalized.includes(userGender);
+      });
+
+      const userProfile = {
+        gender: userGender,
+        bodyShape: analysis.bodyShape,
+        colorSeason: analysis.colorSeason,
+        necklines: analysis.necklines,
+        occasion,
+        seasonOrWeather,
+        stylePreference,
+        colorPreference,
+        fitPreference
+      };
+
+      const scoredOutfits = filteredOutfits.map(outfit => {
+        const { score, matchReasons } = calculateOutfitScore(outfit, userProfile);
+
+        // determine the correct image URL if imageUrl exists on the document or fallback to local
+        let finalImageUrl = outfit.imageUrl || `/outfit_img/${outfit._id}.jpg`;
+
+        return {
+          id: outfit._id,
+          type: outfit.type || "Outfit",
+          category: outfit.category || "",
+          link: outfit.link,
+          imageUrl: finalImageUrl,
+          matchReasons,
+          score
+        };
+      });
+
+      // Sort outfits by highest score first
+      scoredOutfits.sort((a, b) => b.score - a.score);
+
+      // Take top 5 recommendations
+      analysis.dbOutfits = scoredOutfits.slice(0, 5);
+    } catch (err) {
+      console.error("Error fetching or parsing db outfits:", err);
+      analysis.dbOutfits = [];
     }
 
     res.json(analysis);

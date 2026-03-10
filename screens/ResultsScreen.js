@@ -11,6 +11,7 @@ import {
   View
 } from 'react-native';
 import ColorCard from '../components/ColorCard';
+import DbOutfitCard from '../components/DbOutfitCard';
 import OutfitCard from '../components/OutfitCard';
 
 function normalizeColorList(list) {
@@ -131,6 +132,16 @@ const ResultsScreen = ({ navigation, route }) => {
         <Text style={styles.sectionTitle}>Style Summary</Text>
         <View style={styles.summaryCard}>
           <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Face Shape</Text>
+            <Text style={styles.summaryValue}>{analysisResults.faceShape || 'Not Detected'}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Body Shape</Text>
+            <Text style={styles.summaryValue}>{analysisResults.bodyShape || 'Not Detected'}</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Undertone</Text>
             <Text style={styles.summaryValue}>{analysisResults.undertone}</Text>
           </View>
@@ -228,7 +239,7 @@ const ResultsScreen = ({ navigation, route }) => {
       )}
 
       <View style={styles.outfitsSection}>
-        <Text style={styles.sectionTitle}>Recommended Outfits</Text>
+        <Text style={styles.sectionTitle}>Recommended Outfits (Stylist Tips)</Text>
         <FlatList
           data={analysisResults.outfits}
           keyExtractor={(item, index) => item.id || index.toString()}
@@ -238,6 +249,20 @@ const ResultsScreen = ({ navigation, route }) => {
           )}
         />
       </View>
+
+      {analysisResults.dbOutfits && analysisResults.dbOutfits.length > 0 && (
+        <View style={styles.outfitsSection}>
+          <Text style={styles.sectionTitle}>Shop Recommended Outfits</Text>
+          <FlatList
+            data={analysisResults.dbOutfits}
+            keyExtractor={(item, index) => item._id || index.toString()}
+            scrollEnabled={false}
+            renderItem={({ item, index }) => (
+              <DbOutfitCard index={index} outfit={item} onBuyPress={() => handleBuyNow(item.link || 'https://example.com/shop')} />
+            )}
+          />
+        </View>
+      )}
 
       <View style={styles.actionSection}>
         <TouchableOpacity style={styles.actionButton} onPress={handleSaveLook}>

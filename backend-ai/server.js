@@ -39,6 +39,27 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   passwordHash: { type: String, required: true },
+  profileAnalyzed: { type: Boolean, default: false },
+  analysis: {
+    skinTone: String,
+    undertone: String,
+    bodyShape: String,
+    faceShape: String,
+    contrastLevel: String,
+    colorSeason: String,
+    necklines: mongoose.Schema.Types.Mixed,
+    jewelry: mongoose.Schema.Types.Mixed,
+    bestNeutrals: [mongoose.Schema.Types.Mixed],
+    bestAccentColors: [mongoose.Schema.Types.Mixed],
+    avoidColors: [mongoose.Schema.Types.Mixed],
+  },
+  preferences: {
+    styles: [String],
+    occasions: [String],
+    colors: [String],
+    seasonOrWeather: [String],
+    fitPreference: [String]
+  },
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -48,6 +69,7 @@ const userStyleProfileSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", unique: true },
   skinTone: String,
   undertone: String,
+  bodyShape: String,
   contrastLevel: String,
   season: String,
   bestColors: [mongoose.Schema.Types.Mixed],
@@ -122,6 +144,7 @@ app.post("/signup", async (req, res) => {
       success: true,
       userId: user._id.toString(),
       name: user.name,
+      profileAnalyzed: user.profileAnalyzed || false,
     });
   } catch (err) {
     console.error("Signup error:", err);
@@ -151,6 +174,7 @@ app.post("/login", async (req, res) => {
       success: true,
       userId: user._id.toString(),
       name: user.name,
+      profileAnalyzed: user.profileAnalyzed || false,
     });
   } catch (err) {
     console.error("Login error:", err);
@@ -164,6 +188,7 @@ app.post("/style-profile", async (req, res) => {
       userId,
       skinTone,
       undertone,
+      bodyShape,
       contrastLevel,
       season,
       bestColors,
@@ -186,6 +211,7 @@ app.post("/style-profile", async (req, res) => {
       {
         skinTone,
         undertone,
+        bodyShape,
         contrastLevel,
         season,
         bestColors,
@@ -301,50 +327,66 @@ function calculateOutfitScore(outfit, userProfile) {
   // the frontend never receives mismatched outfits.
 
   // Body type match -> +3
-  const userBodyShape = (bodyShape || "").toLowerCase();
+  const userBodyShape = (bodyShape || "").toString().toLowerCase();
   const dbBodyTypes = outfit.suitable_body_types || outfit.suitable_body_type || [];
-  if (userBodyShape && dbBodyTypes.some(bt => userBodyShape.includes(bt.toLowerCase()) || bt.toLowerCase().includes(userBodyShape))) {
+  if (userBodyShape && dbBodyTypes.some(bt => userBodyShape.includes((bt || "").toString().toLowerCase()) || (bt || "").toString().toLowerCase().includes(userBodyShape))) {
     score += 3;
     reasons.push("flatters your body type");
   }
 
   // Season match -> +2
-  const userSeason = (seasonOrWeather || colorSeason || "").toLowerCase();
+  const userSeason = (seasonOrWeather || colorSeason || "").toString().toLowerCase();
   const dbSeasons = outfit.seasons || outfit.weather || [];
-  if (userSeason && dbSeasons.some(s => userSeason.includes(s.toLowerCase()) || s.toLowerCase().includes(userSeason) ||
-    (userSeason.includes("summer") && s.toLowerCase().includes("hot")) ||
-    (userSeason.includes("winter") && s.toLowerCase().includes("cold")))) {
+  if (userSeason && dbSeasons.some(s => {
+    const sStr = (s || "").toString().toLowerCase();
+    return userSeason.includes(sStr) || sStr.includes(userSeason) ||
+    (userSeason.includes("summer") && sStr.includes("hot")) ||
+    (userSeason.includes("winter") && sStr.includes("cold"));
+  })) {
     score += 2;
     reasons.push("perfect for the season/weather");
   }
 
   // Occasion match -> +2
-  const userOccasion = (occasion || "").toLowerCase();
-  if (userOccasion && outfit.occasion && outfit.occasion.toLowerCase().includes(userOccasion)) {
+  const userOccasion = (occasion || "").toString().toLowerCase();
+  
+  let outfitOccasionMatch = false;
+  if (userOccasion && outfit.occasion) {
+    if (Array.isArray(outfit.occasion)) {
+        outfitOccasionMatch = outfit.occasion.some(o => (o || "").toString().toLowerCase().includes(userOccasion));
+    } else {
+        outfitOccasionMatch = (outfit.occasion || "").toString().toLowerCase().includes(userOccasion);
+    }
+  }
+
+  if (outfitOccasionMatch) {
     score += 2;
     reasons.push("matches your occasion");
   }
 
   // Style preference match -> +1
-  const userStyle = (stylePreference || "").toLowerCase();
+  const userStyle = (stylePreference || "").toString().toLowerCase();
   const dbStyles = outfit.style_tags || [];
-  if (userStyle && dbStyles.some(st => st.toLowerCase().includes(userStyle) || userStyle.includes(st.toLowerCase()))) {
+  if (userStyle && dbStyles.some(st => (st || "").toString().toLowerCase().includes(userStyle) || userStyle.includes((st || "").toString().toLowerCase()))) {
     score += 1;
     reasons.push("fits your style preference");
   }
 
   // Color preference match -> +1
-  const userColor = (colorPreference || "").toLowerCase();
+  const userColor = (colorPreference || "").toString().toLowerCase();
   const dbColors = outfit.colors || [];
-  if (userColor && dbColors.some(c => userColor.includes(c.toLowerCase()) || c.toLowerCase().includes(userColor))) {
+  if (userColor && dbColors.some(c => userColor.includes((c || "").toString().toLowerCase()) || (c || "").toString().toLowerCase().includes(userColor))) {
     score += 1;
     reasons.push("matches your color preference");
   }
 
   // Neckline match -> +1
-  const recommendedNecklines = (necklines?.recommended || []).map(n => n.toLowerCase());
+  const recommendedNecklines = Array.isArray(necklines?.recommended) ? necklines.recommended.map(n => (n || "").toString().toLowerCase()) : [];
   const dbNecklines = outfit.necklines || [];
-  if (recommendedNecklines.length > 0 && dbNecklines.some(n => recommendedNecklines.some(rec => rec.includes(n.toLowerCase()) || n.toLowerCase().includes(rec)))) {
+  if (recommendedNecklines.length > 0 && dbNecklines.some(n => {
+    const nStr = (n || "").toString().toLowerCase();
+    return recommendedNecklines.some(rec => rec.includes(nStr) || nStr.includes(rec));
+  })) {
     score += 1;
     reasons.push("features a recommended neckline");
   }
@@ -365,6 +407,7 @@ app.post("/analyze-style", async (req, res) => {
     console.log("[/analyze-style] body keys:", Object.keys(req.body || {}));
 
     let {
+      userId, // added userId extraction
       gender,
       occasion,
       seasonOrWeather,
@@ -660,6 +703,35 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
 
       // Take top 5 recommendations
       analysis.dbOutfits = scoredOutfits.slice(0, 5);
+
+      // Save to User collection if userId is provided
+      if (userId) {
+        const updateData = {
+          profileAnalyzed: true,
+          analysis: {
+            skinTone: analysis.skinTone,
+            undertone: analysis.undertone,
+            bodyShape: analysis.bodyShape,
+            faceShape: analysis.faceShape,
+            contrastLevel: analysis.contrastLevel,
+            colorSeason: analysis.colorSeason,
+            necklines: analysis.necklines,
+            jewelry: analysis.jewelry,
+            bestNeutrals: analysis.bestNeutrals,
+            bestAccentColors: analysis.bestAccentColors,
+            avoidColors: analysis.avoidColors,
+          },
+          preferences: {
+            styles: stylePreference && stylePreference !== "No Preference" ? [stylePreference] : [],
+            occasions: occasion && occasion !== "No Preference" ? [occasion] : [],
+            colors: colorPreference && colorPreference !== "No Preference" ? [colorPreference] : [],
+            seasonOrWeather: seasonOrWeather && seasonOrWeather !== "No Preference" ? [seasonOrWeather] : [],
+            fitPreference: fitPreference && fitPreference !== "No Preference" ? [fitPreference] : []
+          }
+        };
+        await User.findByIdAndUpdate(userId, updateData, { new: true });
+      }
+
     } catch (err) {
       console.error("Error fetching or parsing db outfits:", err);
       analysis.dbOutfits = [];
@@ -676,6 +748,92 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
       details: error.message
     });
 
+  }
+});
+
+app.get("/api/dashboard/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (!user.profileAnalyzed) {
+      return res.status(403).json({ error: "Onboarding required", requireOnboarding: true });
+    }
+
+    // Prepare user profile for scoring
+    const userProfile = {
+      gender: "unisex", // Defaulting to unisex matching if we don't have gender saved, or we can extract it if we had it but we don't in DB right now
+      bodyShape: user.analysis?.bodyShape || "",
+      colorSeason: user.analysis?.colorSeason || "",
+      necklines: user.analysis?.necklines || { recommended: [] },
+      occasion: user.preferences?.occasions?.[0] || "",
+      seasonOrWeather: user.preferences?.seasonOrWeather?.[0] || "",
+      stylePreference: user.preferences?.styles?.[0] || "",
+      colorPreference: user.preferences?.colors?.[0] || "",
+      fitPreference: user.preferences?.fitPreference?.[0] || "",
+      ...user.analysis,
+      ...user.preferences
+    };
+
+    const dbOutfits = await Outfit.find({});
+
+    // Filter outfits by gender (we will default to unisex matching since gender wasn't strictly added to the user model schema earlier)
+    const filteredOutfits = dbOutfits; // All outfits, since gender is tricky without explicit user record
+
+    const scoredOutfits = filteredOutfits.map(outfit => {
+      const { score, matchReasons } = calculateOutfitScore(outfit, userProfile);
+      let finalImageUrl = outfit.imageUrl || `/outfit_img/${outfit._id}.jpg`;
+      return {
+        _id: outfit._id,
+        type: outfit.type || "Outfit",
+        category: outfit.category || "",
+        link: outfit.link,
+        imageUrl: finalImageUrl,
+        matchReasons,
+        score
+      };
+    });
+
+    // Sort descending by score
+    scoredOutfits.sort((a, b) => b.score - a.score);
+
+    // Get Recommendations (top 10)
+    const recommendedOutfits = scoredOutfits.slice(0, 10);
+
+    // Get OOTD (Random high scoring, e.g. from top 5)
+    let outfitOfTheDay = null;
+    if (scoredOutfits.length > 0) {
+      const topCount = Math.min(5, scoredOutfits.length);
+      const randomIndex = Math.floor(Math.random() * topCount);
+      outfitOfTheDay = scoredOutfits[randomIndex];
+    }
+
+    // Construct Response
+    return res.json({
+      success: true,
+      userAnalysis: user.analysis,
+      styleInsights: {
+        season: user.analysis?.colorSeason || "Unknown",
+        undertone: user.analysis?.undertone || "Unknown",
+        bestColors: (user.analysis?.bestNeutrals || []).map(c => c.hex).concat((user.analysis?.bestAccentColors || []).map(c => c.hex)).filter(Boolean),
+        avoidColors: (user.analysis?.avoidColors || []).map(c => c.hex).filter(Boolean),
+        necklines: user.analysis?.necklines?.recommended || [],
+      },
+      outfitOfTheDay,
+      recommendedOutfits
+    });
+
+  } catch (error) {
+    console.error("Dashboard error:", error);
+    res.status(500).json({ error: "Failed to load dashboard data" });
   }
 });
 

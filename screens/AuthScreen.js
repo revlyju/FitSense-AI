@@ -65,7 +65,13 @@ const AuthScreen = ({ navigation }) => {
         throw new Error('Signup did not return a userId.');
       }
 
-      navigation.replace('Main', { screen: 'DashboardRoot', params: { userId } });
+      const profileAnalyzed = response.data?.profileAnalyzed || false;
+
+      if (!profileAnalyzed) {
+        navigation.replace('Onboarding', { userId });
+      } else {
+        navigation.replace('Main', { screen: 'DashboardRoot', params: { userId } });
+      }
     } catch (err) {
       const message =
         err.response?.data?.error ||
@@ -101,7 +107,13 @@ const AuthScreen = ({ navigation }) => {
         throw new Error('Login did not return a userId.');
       }
 
-      navigation.replace('Main', { screen: 'DashboardRoot', params: { userId } });
+      const profileAnalyzed = response.data?.profileAnalyzed || false;
+
+      if (!profileAnalyzed) {
+        navigation.replace('Onboarding', { userId });
+      } else {
+        navigation.replace('Main', { screen: 'DashboardRoot', params: { userId } });
+      }
     } catch (err) {
       const message =
         err.response?.data?.error ||

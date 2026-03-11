@@ -34,6 +34,7 @@ const LoadingScreen = ({ navigation, route }) => {
           colorPreference: userPreferences.colorPreference,
           fitPreference: userPreferences.fitPreference,
           image: userPreferences.image, // base64 string
+          userId, // Added userId so backend knows which DB record to update
         };
 
         const response = await axios.post(`${API_BASE_URL}/analyze-style`, payload, {
@@ -55,6 +56,7 @@ const LoadingScreen = ({ navigation, route }) => {
               userId,
               skinTone: response.data.skinTone,
               undertone: response.data.undertone,
+              bodyShape: response.data.bodyShape,
               contrastLevel: response.data.contrastLevel,
               season: response.data.colorSeason,
               bestColors: response.data.bestNeutrals,
@@ -65,13 +67,17 @@ const LoadingScreen = ({ navigation, route }) => {
           } catch (e) {
             console.error('Failed to save style profile', e?.response?.data || e.message);
           }
-        }
 
-        navigation.replace('Results', {
-          analysisResults: response.data,
-          userPreferences,
-          userId,
-        });
+          navigation.replace('Main', {
+            screen: 'DashboardRoot',
+            params: { userId }
+          });
+        } else {
+          navigation.replace('Results', {
+            analysisResults: response.data,
+            userPreferences
+          });
+        }
       } catch (error) {
         console.error('Analysis error:', error);
         console.error('Error response:', error.response?.data);

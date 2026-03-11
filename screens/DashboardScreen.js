@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 // Mock Data / Structure for UI
 const MOCK_INSIGHTS = {
@@ -11,45 +11,49 @@ const MOCK_INSIGHTS = {
     necklines: ['V-Neck', 'Sweetheart', 'Square']
 };
 
-export default function DashboardScreen({ navigation }) {
+import axios from 'axios';
+import { API_BASE_URL } from '../config';
+
+export default function DashboardScreen({ navigation, route }) {
+    const userId = route?.params?.userId || null;
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState(null);
     const [ootd, setOotd] = useState(null);
     const [recommendations, setRecommendations] = useState([]);
 
     useEffect(() => {
-        // 10. Backend Integration / Mock fetching
         const fetchData = async () => {
+            if (!userId) {
+                setLoading(false);
+                return;
+            }
             try {
-                // Example API endpoints:
-                // const profileRes = await axios.get('/user/profile');
-                // const ootdRes = await axios.get('/user/outfit-of-the-day');
-                // const recRes = await axios.get('/user/recommendations');
-
-                // Simulating API latency
-                setTimeout(() => {
-                    setProfile({ name: 'Sarah', ...MOCK_INSIGHTS });
-                    setOotd({
-                        description: 'Navy structured blazer paired with a crisp white tee and dark wash denim.',
-                        occasion: 'Business Casual',
-                        palette: ['#000080', '#FFFFFF', '#1A1A1A'],
-                        jewellery: 'Silver minimalist watch, geometric stud earrings.'
-                    });
-                    setRecommendations([
-                        { id: 1, name: 'Evening Elegance', desc: 'Burgundy slip dress', occasion: 'Date Night', colors: ['#800020', '#000000'] },
-                        { id: 2, name: 'Weekend Errands', desc: 'Grey wool sweater + black leggings', occasion: 'Casual', colors: ['#808080', '#000000'] },
-                        { id: 3, name: 'Office Core', desc: 'Charcoal trousers + ice blue blouse', occasion: 'Work', colors: ['#36454F', '#A8D8EA'] },
-                    ]);
-                    setLoading(false);
-                }, 1500);
+                const response = await axios.get(`${API_BASE_URL}/api/dashboard/${userId}`);
+                if (response.data.success) {
+                    setProfile({ name: response.data.userName || 'User', ...response.data.styleInsights });
+                    setOotd(response.data.outfitOfTheDay);
+                    setRecommendations(response.data.recommendedOutfits);
+                }
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
+                if (error.response?.data?.requireOnboarding) {
+                     navigation.replace('Onboarding', { userId });
+                }
+            } finally {
                 setLoading(false);
             }
         };
 
         fetchData();
-    }, []);
+        
+        // Add focus listener to refresh when coming back
+        const unsubscribe = navigation.addListener('focus', () => {
+             setLoading(true);
+             fetchData();
+        });
+        
+        return unsubscribe;
+    }, [userId, navigation]);
 
     if (loading) {
         return (
@@ -79,43 +83,50 @@ export default function DashboardScreen({ navigation }) {
             {/* 2. Outfit of the Day */}
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Outfit of the Day</Text>
-                <View style={styles.ootdCard}>
-                    <View style={styles.ootdBadge}>
-                        <Ionicons name="sparkles" size={14} color="#fff" />
-                        <Text style={styles.ootdBadgeText}>AI Selected</Text>
-                    </View>
-                    <Text style={styles.ootdOccasion}>{ootd?.occasion}</Text>
-                    <Text style={styles.ootdDesc}>{ootd?.description}</Text>
+                {ootd ? (
+                    <View style={styles.ootdCard}>
+                        <View style={styles.ootdBadge}>
+                            <Ionicons name="sparkles" size={14} color="#fff" />
+                            <Text style={styles.ootdBadgeText}>AI Selected</Text>
+                        </View>
+                        <Text style={styles.ootdOccasion}>Score: {ootd.score}/10</Text>
+                        <Text style={styles.ootdDesc}>{ootd.type || 'Recommended Outfit'}</Text>
+                        <Text style={{ marginBottom: 12, color: '#444' }}>{ootd.matchReasons}</Text>
 
-                    <View style={styles.paletteRow}>
-                        {ootd?.palette.map((color, idx) => (
-                            <View key={idx} style={[styles.colorSwatch, { backgroundColor: color }]} />
-                        ))}
-                    </View>
+                        {ootd.imageUrl ? (
+                           <Image 
+                               source={{ uri: ootd.imageUrl.startsWith('http') ? ootd.imageUrl : `${API_BASE_URL}${ootd.imageUrl}` }} 
+                               style={{ width: '100%', height: 200, borderRadius: 12, marginBottom: 12 }} 
+                           />
+                        ) : null}
 
-                    <View style={styles.jewelleryHint}>
-                        <Ionicons name="diamond-outline" size={16} color="#666" />
-                        <Text style={styles.jewelleryText}>{ootd?.jewellery}</Text>
+                        {/* <View style={styles.paletteRow}>
+                            {ootd?.palette?.map((color, idx) => (
+                                <View key={idx} style={[styles.colorSwatch, { backgroundColor: color }]} />
+                            ))}
+                        </View> */}
                     </View>
-                </View>
+                ) : (
+                    <Text style={{ color: '#666' }}>No Outfit of the Day available.</Text>
+                )}
             </View>
 
             {/* 3. Recommended Outfits */}
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Recommended For You</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-                    {recommendations.map(rec => (
-                        <View key={rec.id} style={styles.recCard}>
-                            <Text style={styles.recTitle}>{rec.name}</Text>
-                            <Text style={styles.recOccasion}>{rec.occasion}</Text>
-                            <Text style={styles.recDesc}>{rec.desc}</Text>
-                            <View style={styles.paletteRow}>
-                                {rec.colors.map((c, i) => (
-                                    <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: c }]} />
-                                ))}
-                            </View>
+                    {recommendations.length > 0 ? recommendations.map(rec => (
+                        <View key={rec._id} style={styles.recCard}>
+                            {rec.imageUrl ? (
+                                <Image source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }} style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 12 }} />
+                            ) : null}
+                            <Text style={styles.recTitle}>{rec.type || 'Outfit'}</Text>
+                            <Text style={styles.recOccasion}>Score: {rec.score}/10</Text>
+                            <Text style={styles.recDesc}>{rec.matchReasons}</Text>
                         </View>
-                    ))}
+                    )) : (
+                        <Text style={{ marginLeft: 20, color: '#666' }}>No recommendations found.</Text>
+                    )}
                 </ScrollView>
             </View>
 
@@ -165,13 +176,13 @@ export default function DashboardScreen({ navigation }) {
                 <View style={styles.insightsColorsList}>
                     <Text style={styles.insightLabel}>Best Colors:</Text>
                     <View style={styles.paletteRow}>
-                        {profile?.bestColors.map((c, i) => (
+                        {profile?.bestColors?.slice(0, 8).map((c, i) => (
                             <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: c, borderWidth: c === '#FFFFFF' ? 1 : 0, borderColor: '#eee' }]} />
                         ))}
                     </View>
                     <Text style={[styles.insightLabel, { marginTop: 16 }]}>Colors to Avoid:</Text>
                     <View style={styles.paletteRow}>
-                        {profile?.avoidColors.map((c, i) => (
+                        {profile?.avoidColors?.slice(0, 8).map((c, i) => (
                             <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: c }]} />
                         ))}
                     </View>
@@ -181,20 +192,10 @@ export default function DashboardScreen({ navigation }) {
             {/* 7. Quick Actions */}
             <View style={[styles.section, { paddingBottom: 60 }]}>
                 <Text style={styles.sectionTitle}>Quick Actions</Text>
-                <TouchableOpacity style={styles.actionButtonMain}>
+                <TouchableOpacity style={styles.actionButtonMain} onPress={() => { navigation.navigate('Onboarding', { userId }); }}>
                     <Ionicons name="color-wand" size={20} color="#fff" />
-                    <Text style={styles.actionButtonMainText}>Generate New Outfit</Text>
+                    <Text style={styles.actionButtonMainText}>Update My Style Profile</Text>
                 </TouchableOpacity>
-                <View style={styles.actionRow}>
-                    <TouchableOpacity style={styles.actionButtonSecondary} onPress={() => navigation.navigate('Onboarding')}>
-                        <Ionicons name="camera-outline" size={22} color="#1a1a1a" />
-                        <Text style={styles.actionButtonSecondaryText}>Upload Photo</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionButtonSecondary}>
-                        <Ionicons name="analytics-outline" size={22} color="#1a1a1a" />
-                        <Text style={styles.actionButtonSecondaryText}>Analyze Look</Text>
-                    </TouchableOpacity>
-                </View>
             </View>
 
         </ScrollView>

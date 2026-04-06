@@ -48,9 +48,9 @@ export default function MainDrawer() {
             drawerContent={(props) => <CustomDrawerContent {...props} />}
             screenOptions={{
                 headerShown: false,
-                drawerActiveBackgroundColor: '#1a1a1a',
+                drawerActiveBackgroundColor: '#632024',
                 drawerActiveTintColor: '#fff',
-                drawerInactiveTintColor: '#333',
+                drawerInactiveTintColor: '#6F4D38',
                 drawerLabelStyle: { fontSize: 16, marginLeft: -10 },
                 drawerItemStyle: { borderRadius: 12, marginHorizontal: 12, marginVertical: 4 },
             }}
@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#1a1a1a',
+        backgroundColor: '#25344F',
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 12,
@@ -126,17 +126,17 @@ const styles = StyleSheet.create({
     appName: {
         fontSize: 22,
         fontWeight: '700',
-        color: '#1a1a1a'
+        color: '#25344F'
     },
     dummyContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#FAFAFA'
+        backgroundColor: '#D5B893'
     },
     dummyText: {
         fontSize: 18,
-        color: '#666',
+        color: '#6F4D38',
         marginTop: 16,
     },
     logoutSection: {

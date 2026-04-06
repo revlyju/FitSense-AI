@@ -364,18 +364,26 @@ function calculateOutfitScore(outfit, userProfile) {
     reasons.push("matches your occasion");
   }
 
-  // Style preference match -> +1
-  const userStyle = (stylePreference || "").toString().toLowerCase();
+  // Style preference match -> +1 (supports single string or array)
+  const userStyles = Array.isArray(stylePreference)
+    ? stylePreference.map(s => (s || "").toString().toLowerCase())
+    : [(stylePreference || "").toString().toLowerCase()];
   const dbStyles = outfit.style_tags || [];
-  if (userStyle && dbStyles.some(st => (st || "").toString().toLowerCase().includes(userStyle) || userStyle.includes((st || "").toString().toLowerCase()))) {
+  if (userStyles.some(userStyle => userStyle && dbStyles.some(st =>
+    (st || "").toString().toLowerCase().includes(userStyle) || userStyle.includes((st || "").toString().toLowerCase())
+  ))) {
     score += 1;
     reasons.push("fits your style preference");
   }
 
-  // Color preference match -> +1
-  const userColor = (colorPreference || "").toString().toLowerCase();
+  // Color preference match -> +1 (supports single string or array)
+  const userColors = Array.isArray(colorPreference)
+    ? colorPreference.map(c => (c || "").toString().toLowerCase())
+    : [(colorPreference || "").toString().toLowerCase()];
   const dbColors = outfit.colors || [];
-  if (userColor && dbColors.some(c => userColor.includes((c || "").toString().toLowerCase()) || (c || "").toString().toLowerCase().includes(userColor))) {
+  if (userColors.some(userColor => userColor && dbColors.some(c =>
+    userColor.includes((c || "").toString().toLowerCase()) || (c || "").toString().toLowerCase().includes(userColor)
+  ))) {
     score += 1;
     reasons.push("matches your color preference");
   }
@@ -722,11 +730,12 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
             avoidColors: analysis.avoidColors,
           },
           preferences: {
-            styles: stylePreference && stylePreference !== "No Preference" ? [stylePreference] : [],
-            occasions: occasion && occasion !== "No Preference" ? [occasion] : [],
-            colors: colorPreference && colorPreference !== "No Preference" ? [colorPreference] : [],
-            seasonOrWeather: seasonOrWeather && seasonOrWeather !== "No Preference" ? [seasonOrWeather] : [],
-            fitPreference: fitPreference && fitPreference !== "No Preference" ? [fitPreference] : []
+            // Normalize: if already an array keep it, if a single string wrap it, filter out "No Preference"
+            styles: (Array.isArray(stylePreference) ? stylePreference : (stylePreference ? [stylePreference] : [])).filter(v => v && v !== "No Preference"),
+            occasions: (Array.isArray(occasion) ? occasion : (occasion ? [occasion] : [])).filter(v => v && v !== "No Preference"),
+            colors: (Array.isArray(colorPreference) ? colorPreference : (colorPreference ? [colorPreference] : [])).filter(v => v && v !== "No Preference"),
+            seasonOrWeather: (Array.isArray(seasonOrWeather) ? seasonOrWeather : (seasonOrWeather ? [seasonOrWeather] : [])).filter(v => v && v !== "No Preference"),
+            fitPreference: (Array.isArray(fitPreference) ? fitPreference : (fitPreference ? [fitPreference] : [])).filter(v => v && v !== "No Preference")
           }
         };
         await User.findByIdAndUpdate(userId, updateData, { new: true });
@@ -768,19 +777,18 @@ app.get("/api/dashboard/:userId", async (req, res) => {
       return res.status(403).json({ error: "Onboarding required", requireOnboarding: true });
     }
 
-    // Prepare user profile for scoring
+    // Prepare user profile for scoring — pass full arrays so all selected preferences influence results
     const userProfile = {
-      gender: "unisex", // Defaulting to unisex matching if we don't have gender saved, or we can extract it if we had it but we don't in DB right now
+      gender: "unisex",
       bodyShape: user.analysis?.bodyShape || "",
       colorSeason: user.analysis?.colorSeason || "",
       necklines: user.analysis?.necklines || { recommended: [] },
-      occasion: user.preferences?.occasions?.[0] || "",
-      seasonOrWeather: user.preferences?.seasonOrWeather?.[0] || "",
-      stylePreference: user.preferences?.styles?.[0] || "",
-      colorPreference: user.preferences?.colors?.[0] || "",
-      fitPreference: user.preferences?.fitPreference?.[0] || "",
+      occasion: user.preferences?.occasions?.[0] || "",          // single value (occasion is still single-select)
+      seasonOrWeather: user.preferences?.seasonOrWeather?.[0] || "", // single value
+      stylePreference: user.preferences?.styles || "",            // full array
+      colorPreference: user.preferences?.colors || "",            // full array
+      fitPreference: user.preferences?.fitPreference || "",       // full array
       ...user.analysis,
-      ...user.preferences
     };
 
     const dbOutfits = await Outfit.find({});

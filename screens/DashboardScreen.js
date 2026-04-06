@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Mock Data / Structure for UI
 const MOCK_INSIGHTS = {
@@ -13,6 +14,7 @@ const MOCK_INSIGHTS = {
 
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
+import { getWardrobeEssentials } from '../constants/wardrobeEssentials';
 
 export default function DashboardScreen({ navigation, route }) {
     const userId = route?.params?.userId || null;
@@ -20,28 +22,88 @@ export default function DashboardScreen({ navigation, route }) {
     const [profile, setProfile] = useState(null);
     const [ootd, setOotd] = useState(null);
     const [recommendations, setRecommendations] = useState([]);
+    const [stylingHistory, setStylingHistory] = useState([]);
 
     useEffect(() => {
         const fetchData = async () => {
-            if (!userId) {
-                setLoading(false);
-                return;
+            let backendProfile = null;
+            let backendOotd = null;
+            let backendRecs = [];
+            let backendName = 'User';
+
+            if (userId) {
+                try {
+                    const response = await axios.get(`${API_BASE_URL}/api/dashboard/${userId}`);
+                    if (response.data.success) {
+                        backendName = response.data.userName || 'User';
+                        backendProfile = { ...response.data.userAnalysis, ...response.data.styleInsights };
+                        backendOotd = response.data.outfitOfTheDay;
+                        backendRecs = response.data.recommendedOutfits;
+
+                        // Track local styling history using AsyncStorage
+                        try {
+                            const historyKey = `@styling_history_${userId}`;
+                            const existingHistoryStr = await AsyncStorage.getItem(historyKey);
+                            let history = existingHistoryStr ? JSON.parse(existingHistoryStr) : [];
+                            
+                            const newEntry = {
+                               id: Date.now().toString(),
+                               date: new Date().toISOString(),
+                               season: response.data.styleInsights?.season || 'Unknown',
+                               undertone: response.data.styleInsights?.undertone || 'Unknown',
+                               ootdUrl: response.data.outfitOfTheDay?.imageUrl || null
+                            };
+
+                            // Avoid duplicating the exact same insights back-to-back on same day
+                            if (history.length === 0 || history[0].season !== newEntry.season || newEntry.date.slice(0, 10) !== history[0].date.slice(0, 10)) {
+                                 history = [newEntry, ...history].slice(0, 10); // Keep last 10
+                                 await AsyncStorage.setItem(historyKey, JSON.stringify(history));
+                            }
+                            setStylingHistory(history);
+                        } catch (e) {
+                            console.error('Error saving local history:', e);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error fetching dashboard data:', error);
+                }
             }
+
             try {
-                const response = await axios.get(`${API_BASE_URL}/api/dashboard/${userId}`);
-                if (response.data.success) {
-                    setProfile({ name: response.data.userName || 'User', ...response.data.styleInsights });
-                    setOotd(response.data.outfitOfTheDay);
-                    setRecommendations(response.data.recommendedOutfits);
+                // Apply latest locally saved analysis
+                const savedAnalysisStr = await AsyncStorage.getItem('@latest_analysis');
+                if (savedAnalysisStr) {
+                    const saved = JSON.parse(savedAnalysisStr);
+                    backendProfile = {
+                        ...(backendProfile || {}),
+                        season: saved.colorSeason || backendProfile?.season || 'Unknown',
+                        undertone: saved.undertone || backendProfile?.undertone || 'Unknown',
+                        faceShape: saved.faceShape || backendProfile?.faceShape,
+                        bodyShape: saved.bodyShape || backendProfile?.bodyShape,
+                        bestColors: saved.bestNeutrals ? saved.bestNeutrals.map(c => typeof c === 'string' ? c : c.hex) : backendProfile?.bestColors,
+                        avoidColors: saved.avoidColors ? saved.avoidColors.map(c => typeof c === 'string' ? c : c.hex) : backendProfile?.avoidColors,
+                        jewelry: saved.jewelry || backendProfile?.jewelry,
+                    };
+
+                    if (saved.dbOutfits && saved.dbOutfits.length > 0) {
+                        backendRecs = saved.dbOutfits;
+                    } else if (saved.outfits && saved.outfits.length > 0) {
+                        backendRecs = saved.outfits;
+                    }
+
+                    if (saved.outfits && saved.outfits.length > 0 && !backendOotd) {
+                        backendOotd = { ...saved.outfits[0], score: 9, type: 'Latest Saved Look', matchReasons: 'From your recent analysis' };
+                    }
                 }
-            } catch (error) {
-                console.error('Error fetching dashboard data:', error);
-                if (error.response?.data?.requireOnboarding) {
-                     navigation.replace('Onboarding', { userId });
-                }
-            } finally {
-                setLoading(false);
+            } catch (e) {
+                console.error('Error reading local analysis storage:', e);
             }
+
+            setProfile(backendProfile ? { name: backendName, ...backendProfile } : { name: backendName });
+            if (backendOotd) setOotd(backendOotd);
+            setRecommendations(backendRecs);
+
+            setLoading(false);
         };
 
         fetchData();
@@ -58,7 +120,7 @@ export default function DashboardScreen({ navigation, route }) {
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#1a1a1a" />
+                <ActivityIndicator size="large" color="#25344F" />
                 <Text style={styles.loadingText}>Curating your look...</Text>
             </View>
         );
@@ -69,7 +131,7 @@ export default function DashboardScreen({ navigation, route }) {
             {/* 1. Welcome Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                    <Ionicons name="menu-outline" size={28} color="#1a1a1a" />
+                    <Ionicons name="menu-outline" size={28} color="#25344F" />
                 </TouchableOpacity>
                 <View style={styles.headerTitleContainer}>
                     <Text style={styles.greeting}>Welcome back, {profile?.name || 'User'}</Text>
@@ -91,7 +153,7 @@ export default function DashboardScreen({ navigation, route }) {
                         </View>
                         <Text style={styles.ootdOccasion}>Score: {ootd.score}/10</Text>
                         <Text style={styles.ootdDesc}>{ootd.type || 'Recommended Outfit'}</Text>
-                        <Text style={{ marginBottom: 12, color: '#444' }}>{ootd.matchReasons}</Text>
+                        <Text style={{ marginBottom: 12, color: '#6F4D38' }}>{ootd.matchReasons}</Text>
 
                         {ootd.imageUrl ? (
                            <Image 
@@ -100,14 +162,36 @@ export default function DashboardScreen({ navigation, route }) {
                            />
                         ) : null}
 
-                        {/* <View style={styles.paletteRow}>
-                            {ootd?.palette?.map((color, idx) => (
-                                <View key={idx} style={[styles.colorSwatch, { backgroundColor: color }]} />
-                            ))}
-                        </View> */}
+                        {profile?.bestColors && profile.bestColors.length > 0 && (
+                            <View style={styles.paletteRow}>
+                                {profile.bestColors.slice(0, 4).map((color, idx) => (
+                                    <View key={idx} style={[styles.colorSwatch, { backgroundColor: color, borderWidth: color === '#FFFFFF' ? 1 : 0, borderColor: '#eee' }]} />
+                                ))}
+                            </View>
+                        )}
                     </View>
                 ) : (
-                    <Text style={{ color: '#666' }}>No Outfit of the Day available.</Text>
+                    <Text style={{ color: '#6F4D38' }}>No Outfit of the Day available.</Text>
+                )}
+            </View>
+
+            {/* styling history extension */}
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Styling History</Text>
+                {stylingHistory.length > 0 ? (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                        {stylingHistory.map((item) => (
+                            <View key={item.id} style={styles.historyCard}>
+                                <Text style={styles.historyDate}>{new Date(item.date).toLocaleDateString()}</Text>
+                                <Text style={styles.historySeason}>{item.season} • {item.undertone}</Text>
+                                {item.ootdUrl ? (
+                                   <Image source={{ uri: item.ootdUrl.startsWith('http') ? item.ootdUrl : `${API_BASE_URL}${item.ootdUrl}` }} style={{ width: '100%', height: 100, borderRadius: 8, marginTop: 8 }} />
+                                ) : null}
+                            </View>
+                        ))}
+                    </ScrollView>
+                ) : (
+                    <Text style={{ color: '#6F4D38' }}>No styling history available yet.</Text>
                 )}
             </View>
 
@@ -125,7 +209,7 @@ export default function DashboardScreen({ navigation, route }) {
                             <Text style={styles.recDesc}>{rec.matchReasons}</Text>
                         </View>
                     )) : (
-                        <Text style={{ marginLeft: 20, color: '#666' }}>No recommendations found.</Text>
+                        <Text style={{ marginLeft: 20, color: '#6F4D38' }}>No recommendations found.</Text>
                     )}
                 </ScrollView>
             </View>
@@ -135,12 +219,12 @@ export default function DashboardScreen({ navigation, route }) {
                 <Text style={styles.sectionTitle}>Jewellery Match</Text>
                 <View style={styles.jewelGrid}>
                     <View style={styles.jewelCard}>
-                        <Ionicons name="medal-outline" size={28} color="#b0c4de" />
-                        <Text style={styles.jewelTitle}>Silver / White Gold</Text>
-                        <Text style={styles.jewelSub}>Best for Cool undertones</Text>
+                        <Ionicons name="medal-outline" size={28} color={profile?.jewelry?.recommended?.toLowerCase().includes('gold') && !profile?.jewelry?.recommended?.toLowerCase().includes('white') ? '#FFD700' : '#b0c4de'} />
+                        <Text style={styles.jewelTitle}>{profile?.jewelry?.recommended || 'Silver / White Gold'}</Text>
+                        <Text style={styles.jewelSub}>{profile?.jewelry?.reason || 'Best for your undertones'}</Text>
                     </View>
                     <View style={styles.jewelCard}>
-                        <Ionicons name="watch-outline" size={28} color="#1a1a1a" />
+                        <Ionicons name="watch-outline" size={28} color="#25344F" />
                         <Text style={styles.jewelTitle}>Minimalist Watch</Text>
                         <Text style={styles.jewelSub}>Leather or mesh band</Text>
                     </View>
@@ -151,9 +235,9 @@ export default function DashboardScreen({ navigation, route }) {
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Wardrobe Must-Haves</Text>
                 <View style={styles.mustHavesCard}>
-                    {['Structured Navy Blazer', 'Crisp White Button-down', 'Black Pointed Ankle Boots', 'Tailored Charcoal Trousers'].map((item, idx) => (
+                    {getWardrobeEssentials(profile?.season, profile?.bodyShape).map((item, idx) => (
                         <View key={idx} style={styles.checkListItem}>
-                            <Ionicons name="checkmark-circle-outline" size={22} color="#1a1a1a" />
+                            <Ionicons name="checkmark-circle-outline" size={22} color="#632024" />
                             <Text style={styles.checkListText}>{item}</Text>
                         </View>
                     ))}
@@ -205,18 +289,18 @@ export default function DashboardScreen({ navigation, route }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#FAFAFA',
+        backgroundColor: '#D5B893',
     },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#FAFAFA',
+        backgroundColor: '#D5B893',
     },
     loadingText: {
         marginTop: 16,
         fontSize: 16,
-        color: '#666',
+        color: '#6F4D38',
         fontWeight: '500',
     },
     header: {
@@ -226,9 +310,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingTop: 60,
         paddingBottom: 20,
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
+        borderBottomColor: '#C6A57A',
     },
     menuButton: {
         padding: 4,
@@ -240,25 +324,25 @@ const styles = StyleSheet.create({
     greeting: {
         fontSize: 20,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: '#25344F',
     },
     tagline: {
         fontSize: 14,
-        color: '#888',
+        color: '#6F4D38',
         marginTop: 4,
     },
     profileAvatar: {
         width: 44,
         height: 44,
         borderRadius: 22,
-        backgroundColor: '#f0f0f0',
+        backgroundColor: '#C6A57A',
         justifyContent: 'center',
         alignItems: 'center',
     },
     avatarText: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: '#25344F',
     },
     section: {
         paddingHorizontal: 20,
@@ -267,11 +351,11 @@ const styles = StyleSheet.create({
     sectionTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: '#25344F',
         marginBottom: 16,
     },
     ootdCard: {
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         borderRadius: 24,
         padding: 24,
         shadowColor: '#000',
@@ -282,7 +366,7 @@ const styles = StyleSheet.create({
     },
     ootdBadge: {
         alignSelf: 'flex-start',
-        backgroundColor: '#1a1a1a',
+        backgroundColor: '#632024',
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
@@ -300,7 +384,7 @@ const styles = StyleSheet.create({
     },
     ootdOccasion: {
         fontSize: 13,
-        color: '#888',
+        color: '#6F4D38',
         textTransform: 'uppercase',
         letterSpacing: 1,
         marginBottom: 8,
@@ -309,7 +393,7 @@ const styles = StyleSheet.create({
     ootdDesc: {
         fontSize: 24,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: '#25344F',
         lineHeight: 34,
         marginBottom: 24,
     },
@@ -335,13 +419,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginTop: 24,
         borderTopWidth: 1,
-        borderTopColor: '#f0f0f0',
+        borderTopColor: '#C6A57A',
         paddingTop: 16,
     },
     jewelleryText: {
         marginLeft: 10,
         fontSize: 15,
-        color: '#444',
+        color: '#6F4D38',
     },
     horizontalScroll: {
         marginHorizontal: -20,
@@ -349,7 +433,7 @@ const styles = StyleSheet.create({
     },
     recCard: {
         width: 260,
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         borderRadius: 20,
         padding: 20,
         marginRight: 16,
@@ -362,12 +446,36 @@ const styles = StyleSheet.create({
     recTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: '#25344F',
         marginBottom: 6,
+    },
+    historyCard: {
+        width: 180,
+        backgroundColor: '#EAD8C5',
+        borderRadius: 16,
+        padding: 16,
+        marginRight: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        elevation: 2,
+    },
+    historyDate: {
+        fontSize: 12,
+        color: '#6F4D38',
+        marginBottom: 4,
+        fontWeight: '600',
+    },
+    historySeason: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#25344F',
+        marginBottom: 8,
     },
     recOccasion: {
         fontSize: 12,
-        color: '#888',
+        color: '#6F4D38',
         textTransform: 'uppercase',
         letterSpacing: 1,
         marginBottom: 14,
@@ -375,7 +483,7 @@ const styles = StyleSheet.create({
     },
     recDesc: {
         fontSize: 15,
-        color: '#444',
+        color: '#6F4D38',
         lineHeight: 22,
         marginBottom: 20,
     },
@@ -385,7 +493,7 @@ const styles = StyleSheet.create({
     },
     jewelCard: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         padding: 20,
         borderRadius: 20,
         justifyContent: 'center',
@@ -398,17 +506,17 @@ const styles = StyleSheet.create({
     jewelTitle: {
         fontSize: 15,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: '#25344F',
         marginTop: 16,
         marginBottom: 6,
     },
     jewelSub: {
         fontSize: 13,
-        color: '#666',
+        color: '#6F4D38',
         lineHeight: 18,
     },
     mustHavesCard: {
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         borderRadius: 20,
         padding: 20,
         shadowColor: '#000',
@@ -422,12 +530,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 14,
         borderBottomWidth: 1,
-        borderBottomColor: '#f8f8f8',
+        borderBottomColor: '#D5B893',
     },
     checkListText: {
         marginLeft: 16,
         fontSize: 16,
-        color: '#333',
+        color: '#25344F',
         fontWeight: '500',
     },
     insightsGrid: {
@@ -437,7 +545,7 @@ const styles = StyleSheet.create({
     },
     insightBox: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         borderRadius: 20,
         padding: 20,
         shadowColor: '#000',
@@ -447,7 +555,7 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     insightsColorsList: {
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         borderRadius: 20,
         padding: 20,
         shadowColor: '#000',
@@ -458,7 +566,7 @@ const styles = StyleSheet.create({
     },
     insightLabel: {
         fontSize: 12,
-        color: '#888',
+        color: '#6F4D38',
         marginBottom: 8,
         textTransform: 'uppercase',
         letterSpacing: 1,
@@ -467,10 +575,10 @@ const styles = StyleSheet.create({
     insightValue: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#1a1a1a',
+        color: '#25344F',
     },
     actionButtonMain: {
-        backgroundColor: '#1a1a1a',
+        backgroundColor: '#632024',
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
@@ -490,7 +598,7 @@ const styles = StyleSheet.create({
     },
     actionButtonSecondary: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#EAD8C5',
         flexDirection: 'column',
         justifyContent: 'center',
         alignItems: 'center',
@@ -500,7 +608,7 @@ const styles = StyleSheet.create({
         borderColor: '#eee',
     },
     actionButtonSecondaryText: {
-        color: '#1a1a1a',
+        color: '#25344F',
         fontSize: 14,
         fontWeight: '600',
         marginTop: 12,

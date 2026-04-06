@@ -1,14 +1,28 @@
 import axios from 'axios';
 import { useEffect } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../config';
 
 const LoadingScreen = ({ navigation, route }) => {
-  const userPreferences = route?.params?.userPreferences;
+  const routeUserPreferences = route?.params?.userPreferences || {};
+  const routeImage = route?.params?.image;
+  const userPreferences = {
+    ...routeUserPreferences,
+    image: routeUserPreferences.image || routeImage,
+  };
   const userId = route?.params?.userId ?? null;
 
+  const isNight = userPreferences.timeOfDay === "Night";
+
+  const theme = {
+    bg: isNight ? "#25344F" : "#D5B893",
+    text: isNight ? "#D5B893" : "#25344F",
+    subText: isNight ? "#cbb89a" : "#6F4D38",
+  };
+
   useEffect(() => {
-    if (!userPreferences) {
+    if (!userPreferences || !userPreferences.image) {
       navigation.replace('Onboarding');
       return;
     }
@@ -50,6 +64,12 @@ const LoadingScreen = ({ navigation, route }) => {
           throw new Error(response.data.error);
         }
 
+        try {
+          await AsyncStorage.setItem('@latest_analysis', JSON.stringify(response.data));
+        } catch (e) {
+          console.error("Failed to auto-save analysis locally", e);
+        }
+
         if (userId) {
           try {
             await axios.post(`${API_BASE_URL}/style-profile`, {
@@ -73,10 +93,10 @@ const LoadingScreen = ({ navigation, route }) => {
             params: { userId }
           });
         } else {
-          navigation.replace('Results', {
-            analysisResults: response.data,
-            userPreferences
-          });
+          navigation.replace("Results", {
+  analysisResults: response.data,
+  userPreferences,
+});
         }
       } catch (error) {
         console.error('Analysis error:', error);
@@ -111,10 +131,10 @@ const LoadingScreen = ({ navigation, route }) => {
   }
 
   return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color="#1a1a1a" />
-      <Text style={styles.text}>Analyzing your style...</Text>
-      <Text style={styles.subtext}>This may take a moment</Text>
+    <View style={[styles.container, { backgroundColor: theme.bg }]}>
+      <ActivityIndicator size="large" color={theme.text} />
+      <Text style={[styles.text, { color: theme.text }]}>Analyzing your style...</Text>
+      <Text style={[styles.subtext, { color: theme.subText }]}>This may take a moment</Text>
     </View>
   );
 };
@@ -124,17 +144,17 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#D5B893', // FIXED
   },
   text: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#1a1a1a',
+    color: '#25344F',
     marginTop: 20,
   },
   subtext: {
     fontSize: 14,
-    color: '#999',
+    color: '#6F4D38',
     marginTop: 8,
   },
 });

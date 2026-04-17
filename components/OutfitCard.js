@@ -1,18 +1,13 @@
 import {
-  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 const OutfitCard = ({ outfit, index, onBuyPress }) => {
   return (
     <View style={styles.card}>
-      <Image
-        source={{ uri: outfit.image || 'https://via.placeholder.com/300x400?text=Outfit+Idea' }}
-        style={styles.image}
-      />
       <View style={styles.content}>
         <Text style={styles.title}>Outfit #{index + 1}: {outfit.style || 'Everyday Wear'}</Text>
         <Text style={styles.reason}>{outfit.description}</Text>
@@ -37,11 +32,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#eee',
-  },
-  image: {
-    width: '100%',
-    height: 250,
-    backgroundColor: '#f0f0f0',
   },
   content: {
     padding: 14,

@@ -18,11 +18,11 @@ const DbOutfitCard = ({ outfit, index, onBuyPress }) => {
     const rawUrl = outfit.imageUrl;
     let imageUri = 'backend-ai/outfit_img/placeholder.webp';
     if (rawUrl) {
-        // if it starts with http, use it, else append API_BASE_URL
         if (rawUrl.startsWith('http')) {
             imageUri = rawUrl;
         } else {
-            imageUri = `${API_BASE_URL}${rawUrl}`;
+            const cleanUrl = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
+            imageUri = `${API_BASE_URL}${cleanUrl}`;
         }
     }
 

@@ -7,6 +7,8 @@ const axios = require("axios");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const path = require("path");
+const fs = require("fs");
+const FormData = require("form-data");
 // Force Node.js to use Google's DNS servers for resolving the MongoDB SRV record
 // This fixes network issues where local ISPs block Node.js DNS queries.
 try {
@@ -156,12 +158,12 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body || {};
 
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: "Valid email and password are required" });
     }
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!user) {
+    if (!user || !user.passwordHash) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
@@ -340,8 +342,8 @@ function calculateOutfitScore(outfit, userProfile) {
   if (userSeason && dbSeasons.some(s => {
     const sStr = (s || "").toString().toLowerCase();
     return userSeason.includes(sStr) || sStr.includes(userSeason) ||
-    (userSeason.includes("summer") && sStr.includes("hot")) ||
-    (userSeason.includes("winter") && sStr.includes("cold"));
+      (userSeason.includes("summer") && sStr.includes("hot")) ||
+      (userSeason.includes("winter") && sStr.includes("cold"));
   })) {
     score += 2;
     reasons.push("perfect for the season/weather");
@@ -349,13 +351,13 @@ function calculateOutfitScore(outfit, userProfile) {
 
   // Occasion match -> +2
   const userOccasion = (occasion || "").toString().toLowerCase();
-  
+
   let outfitOccasionMatch = false;
   if (userOccasion && outfit.occasion) {
     if (Array.isArray(outfit.occasion)) {
-        outfitOccasionMatch = outfit.occasion.some(o => (o || "").toString().toLowerCase().includes(userOccasion));
+      outfitOccasionMatch = outfit.occasion.some(o => (o || "").toString().toLowerCase().includes(userOccasion));
     } else {
-        outfitOccasionMatch = (outfit.occasion || "").toString().toLowerCase().includes(userOccasion);
+      outfitOccasionMatch = (outfit.occasion || "").toString().toLowerCase().includes(userOccasion);
     }
   }
 
@@ -364,18 +366,26 @@ function calculateOutfitScore(outfit, userProfile) {
     reasons.push("matches your occasion");
   }
 
-  // Style preference match -> +1
-  const userStyle = (stylePreference || "").toString().toLowerCase();
+  // Style preference match -> +1 (supports single string or array)
+  const userStyles = Array.isArray(stylePreference)
+    ? stylePreference.map(s => (s || "").toString().toLowerCase())
+    : [(stylePreference || "").toString().toLowerCase()];
   const dbStyles = outfit.style_tags || [];
-  if (userStyle && dbStyles.some(st => (st || "").toString().toLowerCase().includes(userStyle) || userStyle.includes((st || "").toString().toLowerCase()))) {
+  if (userStyles.some(userStyle => userStyle && dbStyles.some(st =>
+    (st || "").toString().toLowerCase().includes(userStyle) || userStyle.includes((st || "").toString().toLowerCase())
+  ))) {
     score += 1;
     reasons.push("fits your style preference");
   }
 
-  // Color preference match -> +1
-  const userColor = (colorPreference || "").toString().toLowerCase();
+  // Color preference match -> +1 (supports single string or array)
+  const userColors = Array.isArray(colorPreference)
+    ? colorPreference.map(c => (c || "").toString().toLowerCase())
+    : [(colorPreference || "").toString().toLowerCase()];
   const dbColors = outfit.colors || [];
-  if (userColor && dbColors.some(c => userColor.includes((c || "").toString().toLowerCase()) || (c || "").toString().toLowerCase().includes(userColor))) {
+  if (userColors.some(userColor => userColor && dbColors.some(c =>
+    userColor.includes((c || "").toString().toLowerCase()) || (c || "").toString().toLowerCase().includes(userColor)
+  ))) {
     score += 1;
     reasons.push("matches your color preference");
   }
@@ -434,6 +444,47 @@ app.post("/analyze-style", async (req, res) => {
       });
     }
 
+    // ==== HYBRID PYTHON PIPELINE ====
+    let finalImageData = parsedImage.data;
+    let finalMimeType = parsedImage.mimeType;
+    let pyFaceShape = "Unknown";
+    let pyContrastLevel = "Unknown";
+
+    try {
+      const imageBuffer = Buffer.from(parsedImage.data, 'base64');
+      const form = new FormData();
+      form.append('file', imageBuffer, {
+        filename: 'upload.jpg',
+        contentType: parsedImage.mimeType || 'image/jpeg'
+      });
+
+      const pyResponse = await axios.post('http://localhost:8000/analyze-face', form, {
+        headers: {
+          ...form.getHeaders()
+        },
+        timeout: 30000
+      });
+
+      if (pyResponse.data) {
+        if (pyResponse.data.faceShape) pyFaceShape = pyResponse.data.faceShape;
+        if (pyResponse.data.contrastLevel) pyContrastLevel = pyResponse.data.contrastLevel;
+        if (pyResponse.data.censoredImage) {
+          finalImageData = pyResponse.data.censoredImage;
+          finalMimeType = 'image/jpeg';
+          console.log("Python successfully censored a face in the image.");
+        } else {
+          console.log("Python did not detect a face to censor. Passing original image directly.");
+        }
+        
+        const censorPath = path.join(__dirname, 'censored_latest.jpg');
+        fs.writeFileSync(censorPath, Buffer.from(finalImageData, 'base64'));
+        console.log(`\n\n🟢 IMAGE SENT TO API! View it here: file:///${censorPath.replace(/\\/g, '/')}\n\n`);
+      }
+    } catch (pyErr) {
+      console.warn("Python microservice failed or is unreachable. Falling back to default Gemini processing.", pyErr.message);
+    }
+    // ================================
+
     const prompt = `
 You are an expert 12-season color analyst and fashion stylist. You MUST perform a rigorous and unbiased analysis of the provided image. 
 CRITICAL RULES:
@@ -488,6 +539,9 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
 
 User Profile Context:
 Gender: ${gender ?? "Not specified"}
+Detected Face Shape: ${pyFaceShape}
+Detected Contrast Level: ${pyContrastLevel}
+(Please use the detected face shape and contrast level directly in your JSON output if they are not Unknown.)
 `;
 
     const geminiPayload = {
@@ -497,8 +551,8 @@ Gender: ${gender ?? "Not specified"}
             { text: prompt },
             {
               inline_data: {
-                mime_type: parsedImage.mimeType,
-                data: parsedImage.data
+                mime_type: finalMimeType,
+                data: finalImageData
               }
             }
           ]
@@ -722,11 +776,12 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
             avoidColors: analysis.avoidColors,
           },
           preferences: {
-            styles: stylePreference && stylePreference !== "No Preference" ? [stylePreference] : [],
-            occasions: occasion && occasion !== "No Preference" ? [occasion] : [],
-            colors: colorPreference && colorPreference !== "No Preference" ? [colorPreference] : [],
-            seasonOrWeather: seasonOrWeather && seasonOrWeather !== "No Preference" ? [seasonOrWeather] : [],
-            fitPreference: fitPreference && fitPreference !== "No Preference" ? [fitPreference] : []
+            // Normalize: if already an array keep it, if a single string wrap it, filter out "No Preference"
+            styles: (Array.isArray(stylePreference) ? stylePreference : (stylePreference ? [stylePreference] : [])).filter(v => v && v !== "No Preference"),
+            occasions: (Array.isArray(occasion) ? occasion : (occasion ? [occasion] : [])).filter(v => v && v !== "No Preference"),
+            colors: (Array.isArray(colorPreference) ? colorPreference : (colorPreference ? [colorPreference] : [])).filter(v => v && v !== "No Preference"),
+            seasonOrWeather: (Array.isArray(seasonOrWeather) ? seasonOrWeather : (seasonOrWeather ? [seasonOrWeather] : [])).filter(v => v && v !== "No Preference"),
+            fitPreference: (Array.isArray(fitPreference) ? fitPreference : (fitPreference ? [fitPreference] : [])).filter(v => v && v !== "No Preference")
           }
         };
         await User.findByIdAndUpdate(userId, updateData, { new: true });
@@ -768,19 +823,18 @@ app.get("/api/dashboard/:userId", async (req, res) => {
       return res.status(403).json({ error: "Onboarding required", requireOnboarding: true });
     }
 
-    // Prepare user profile for scoring
+    // Prepare user profile for scoring — pass full arrays so all selected preferences influence results
     const userProfile = {
-      gender: "unisex", // Defaulting to unisex matching if we don't have gender saved, or we can extract it if we had it but we don't in DB right now
+      gender: "unisex",
       bodyShape: user.analysis?.bodyShape || "",
       colorSeason: user.analysis?.colorSeason || "",
       necklines: user.analysis?.necklines || { recommended: [] },
-      occasion: user.preferences?.occasions?.[0] || "",
-      seasonOrWeather: user.preferences?.seasonOrWeather?.[0] || "",
-      stylePreference: user.preferences?.styles?.[0] || "",
-      colorPreference: user.preferences?.colors?.[0] || "",
-      fitPreference: user.preferences?.fitPreference?.[0] || "",
+      occasion: user.preferences?.occasions?.[0] || "",          // single value (occasion is still single-select)
+      seasonOrWeather: user.preferences?.seasonOrWeather?.[0] || "", // single value
+      stylePreference: user.preferences?.styles || "",            // full array
+      colorPreference: user.preferences?.colors || "",            // full array
+      fitPreference: user.preferences?.fitPreference || "",       // full array
       ...user.analysis,
-      ...user.preferences
     };
 
     const dbOutfits = await Outfit.find({});

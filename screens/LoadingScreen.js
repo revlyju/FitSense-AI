@@ -41,6 +41,15 @@ const LoadingScreen = ({ navigation, route }) => {
         } else if (rawGender.includes('male') || rawGender === 'man' || rawGender === 'men') {
           userGender = 'men';
         }
+        let activeUserId = userId;
+        if (!activeUserId) {
+          try {
+            activeUserId = await AsyncStorage.getItem('userId');
+          } catch (e) {
+            console.error("Failed to fetch AsyncStorage userId", e);
+          }
+        }
+
         const payload = {
           gender: userPreferences.gender,
           userGender,
@@ -53,7 +62,7 @@ const LoadingScreen = ({ navigation, route }) => {
           colorPreference: userPreferences.colorPreference,
           fitPreference: userPreferences.fitPreference,
           image: userPreferences.image, // base64 string
-          userId, // Added userId so backend knows which DB record to update
+          userId: activeUserId, // Explicitly pass resolved ID
         };
 
         const response = await axios.post(`${API_BASE_URL}/analyze-style`, payload, {
@@ -75,10 +84,10 @@ const LoadingScreen = ({ navigation, route }) => {
           console.error("Failed to auto-save analysis locally", e);
         }
 
-        if (userId) {
+        if (activeUserId) {
           try {
             await axios.post(`${API_BASE_URL}/style-profile`, {
-              userId,
+              userId: activeUserId,
               skinTone: response.data.skinTone,
               undertone: response.data.undertone,
               bodyShape: response.data.bodyShape,
@@ -95,7 +104,7 @@ const LoadingScreen = ({ navigation, route }) => {
 
           navigation.replace('Main', {
             screen: 'DashboardRoot',
-            params: { userId }
+            params: { userId: activeUserId }
           });
         } else {
           navigation.replace("Results", {

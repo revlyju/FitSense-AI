@@ -12,6 +12,9 @@ base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
 options = vision.FaceLandmarkerOptions(base_options=base_options,
                                        output_face_blendshapes=False,
                                        output_facial_transformation_matrixes=False,
+                                       min_face_detection_confidence=0.5,
+                                       min_face_presence_confidence=0.5,
+                                       min_tracking_confidence=0.5,
                                        num_faces=1)
 detector = vision.FaceLandmarker.create_from_options(options)
 
@@ -25,16 +28,20 @@ def detect_face_shape(landmarks, image_shape):
     jaw_width = abs(points[234][0] - points[454][0])
     face_height = abs(points[10][1] - points[152][1])
 
-    ratio = face_height / jaw_width if jaw_width != 0 else 1
+    raw_ratio = face_height / jaw_width if jaw_width != 0 else 1
+    # Round to prevent microscopic visual shifts causing wildly different shape text results
+    ratio = round(raw_ratio, 2)
 
-    if ratio > 1.5:
+    if ratio > 1.45:
         return "Oval"
-    elif ratio > 1.3:
+    elif ratio > 1.25:
         return "Round"
-    elif ratio > 1.1:
+    elif ratio > 1.15:
+        return "Heart"
+    elif ratio >= 1.05:
         return "Square"
     else:
-        return "Heart"
+        return "Balanced"
 
 def detect_contrast(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -59,10 +66,22 @@ async def analyze_face(file: UploadFile = File(...)):
             "contrastLevel": "Unknown"
         }
 
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    detection_result = detector.detect(mp_image)
+    # Normalize incoming image processing to ensure FaceMesh acts deterministically on consistent dimensions
+    try:
+        image = cv2.resize(image, (512, 512))
+    except Exception as e:
+        pass
 
-    if not detection_result.face_landmarks:
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    
+    # 3-Attempt Retry Block for Mediapipe stability
+    detection_result = None
+    for _ in range(3):
+        detection_result = detector.detect(mp_image)
+        if detection_result and detection_result.face_landmarks:
+            break
+
+    if not detection_result or not detection_result.face_landmarks:
         # Fallback to OpenCV Haar Cascades
         cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         face_cascade = cv2.CascadeClassifier(cascade_path)

@@ -41,6 +41,7 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   passwordHash: { type: String, required: true },
+  gender: { type: String, default: "unisex" },
   profileAnalyzed: { type: Boolean, default: false },
   analysis: {
     skinTone: String,
@@ -62,6 +63,23 @@ const userSchema = new mongoose.Schema({
     seasonOrWeather: [String],
     fitPreference: [String]
   },
+  history: [{
+    date: { type: Date, default: Date.now },
+    season: String,
+    undertone: String,
+    ootdUrl: String,
+    analysisData: mongoose.Schema.Types.Mixed
+  }],
+  likedOutfits: [{ 
+    outfitId: String, 
+    likedAt: { type: Date, default: Date.now } 
+  }],
+  styleMemory: {
+    likedColors: [String],
+    likedCategories: [String],
+    likedStyles: [String],
+    interactionCount: { type: Number, default: 0 }
+  },
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -82,6 +100,27 @@ const userStyleProfileSchema = new mongoose.Schema({
 });
 
 const UserStyleProfile = mongoose.model("UserStyleProfile", userStyleProfileSchema);
+
+const analysisHistorySchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  createdAt: { type: Date, default: Date.now },
+  analysisName: String,
+  faceShape: String,
+  bodyShape: String,
+  skinTone: String,
+  undertone: String,
+  contrastLevel: String,
+  bestColors: [mongoose.Schema.Types.Mixed],
+  avoidColors: [mongoose.Schema.Types.Mixed],
+  recommendedOutfits: [{
+      outfitId: String,
+      type: String,
+      imageUrl: String,
+      link: String,
+      score: Number
+  }]
+});
+const AnalysisHistory = mongoose.model("AnalysisHistory", analysisHistorySchema);
 
 const outfitsDb = mongoose.connection.useDb('outfits');
 const outfitSchema = new mongoose.Schema({
@@ -181,6 +220,106 @@ app.post("/login", async (req, res) => {
   } catch (err) {
     console.error("Login error:", err);
     return res.status(500).json({ error: "Failed to login" });
+  }
+});
+
+// ==== LIKED OUTFIT ROUTES ====
+app.post("/like-outfit", async (req, res) => {
+  try {
+    const { userId, outfit } = req.body;
+    if (!userId || !outfit || !outfit.id) {
+      return res.status(400).json({ error: "userId and outfit are required" });
+    }
+    
+    let user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Validate if already liked
+    const alreadyLiked = user.likedOutfits.some(lo => lo.outfitId === outfit.id.toString());
+    if (alreadyLiked) {
+      return res.status(400).json({ error: "Outfit already liked" });
+    }
+
+    // Push to likedOutfits
+    user.likedOutfits.push({ outfitId: outfit.id.toString(), likedAt: new Date() });
+
+    // Expand Style Memory safely
+    if (!user.styleMemory) {
+      user.styleMemory = { likedColors: [], likedCategories: [], likedStyles: [], interactionCount: 0 };
+    }
+
+    // Extract tags
+    const newColors = Array.isArray(outfit.colors) ? outfit.colors : typeof outfit.colors === 'string' ? outfit.colors.split(',') : [];
+    const newTags = Array.isArray(outfit.style_tags) ? outfit.style_tags : typeof outfit.style_tags === 'string' ? outfit.style_tags.split(',') : [];
+    const cat = outfit.category;
+
+    newColors.forEach(c => {
+      const color = c.trim().toLowerCase();
+      if (color && !user.styleMemory.likedColors.includes(color)) user.styleMemory.likedColors.push(color);
+    });
+
+    if (cat) {
+      const cleanCat = cat.trim().toLowerCase();
+      if (!user.styleMemory.likedCategories.includes(cleanCat)) user.styleMemory.likedCategories.push(cleanCat);
+    }
+
+    newTags.forEach(t => {
+      const tag = t.trim().toLowerCase();
+      if (tag && !user.styleMemory.likedStyles.includes(tag)) user.styleMemory.likedStyles.push(tag);
+    });
+
+    user.styleMemory.interactionCount += 1;
+    await user.save();
+    return res.json({ success: true, likedOutfits: user.likedOutfits, styleMemory: user.styleMemory });
+
+  } catch (error) {
+    console.error("Like Outfit Error:", error);
+    res.status(500).json({ error: "Failed to process outfit like" });
+  }
+});
+
+app.post("/unlike-outfit", async (req, res) => {
+  try {
+    const { userId, outfitId } = req.body;
+    if (!userId || !outfitId) {
+      return res.status(400).json({ error: "userId and outfitId required" });
+    }
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.likedOutfits = user.likedOutfits.filter(lo => lo.outfitId !== outfitId.toString());
+    await user.save();
+    return res.json({ success: true, likedOutfits: user.likedOutfits });
+  } catch (error) {
+    console.error("Unlike Error:", error);
+    res.status(500).json({ error: "Failed to unlike outfit" });
+  }
+});
+
+app.get("/user-profile/:userId", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).lean();
+    if (!user) return res.status(404).json({ error: "User not found" });
+    
+    // Convert generic IDs into full DB outfits
+    const Outfit = mongoose.connection.useDb('outfits').model("Outfit", new mongoose.Schema({}, { strict: false }), "outfits");
+    
+    const likedIds = (user.likedOutfits || []).map(lo => lo.outfitId);
+    let populatedOutfits = [];
+    if (likedIds.length > 0) {
+       // Search via both standard _id mapping or custom id strings
+       populatedOutfits = await Outfit.find({ 
+           $or: [ { id: { $in: likedIds } }, { _id: { $in: likedIds } } ] 
+       }).lean();
+    }
+
+    // Remap their IDs reliably for Frontend and sort by newest likes
+    populatedOutfits = populatedOutfits.map(o => ({ ...o, id: o.id || o._id.toString() }));
+    
+    return res.json({ ...user, populatedLikedOutfits: populatedOutfits });
+  } catch (error) {
+    console.error("Get Profile Error:", error);
+    res.status(500).json({ error: "Failed to load active profile memory" });
   }
 });
 
@@ -286,128 +425,426 @@ function tryParseJsonFromText(text) {
 }
 
 async function callGemini(url, payload) {
+  let lastResponse = null;
+  let lastError = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      lastResponse = await axios.post(url, payload, {
+        timeout: 90000,
+        headers: { "Content-Type": "application/json" },
+        validateStatus: () => true,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity
+      });
 
-    const response = await axios.post(url, payload, {
-      timeout: 90000,
-      headers: { "Content-Type": "application/json" },
-      validateStatus: () => true,
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity
-    });
-
-    if (response.status === 429 || response.status >= 500) {
-      console.warn(`Gemini rate limit or server error hit (Status ${response.status}). Retry attempt ${attempt}`);
-      await sleep(2000);
-      continue;
+      if (lastResponse.status === 429 || lastResponse.status >= 500) {
+        if (attempt < 2) {
+          console.warn(`Gemini API error hit (Status ${lastResponse.status}). Retry attempt ${attempt}`);
+          await sleep(2000);
+          continue;
+        }
+      } else {
+        // Success or non-retryable error (like 400, 404)
+        return lastResponse;
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn(`Network error reaching Gemini (${err.message}). Retry attempt ${attempt}`);
+      if (attempt < 2) {
+        await sleep(2000);
+        continue;
+      }
     }
-
-    return response;
   }
 
-  // Return the last response even if it's an error so the caller can log it and try the next model
-  const lastResponse = await axios.post(url, payload, {
-    timeout: 90000,
-    headers: { "Content-Type": "application/json" },
-    validateStatus: () => true,
-    maxBodyLength: Infinity,
-    maxContentLength: Infinity
-  });
-  return lastResponse;
+  // If we had a valid HTTP response, return it so caller can use upstreamStatus
+  if (lastResponse) return lastResponse;
+
+  // Otherwise return a fake response object to signify network failure
+  return {
+    status: 502,
+    data: {
+      error: "Hard network failure reaching Gemini",
+      details: lastError ? lastError.message : "Unknown"
+    }
+  };
 }
 
-// outfit scorer
-function calculateOutfitScore(outfit, userProfile) {
-  let score = 0;
-  let reasons = [];
+// outfit scorer and recommender
+function getSmartRecommendations(dbOutfits, userProfile) {
+  const { 
+    gender, bodyShape, occasion, seasonOrWeather, 
+    stylePreference, colorPreference, fitPreference 
+  } = userProfile;
 
-  const { gender, bodyShape, colorSeason, necklines, occasion, seasonOrWeather, stylePreference, colorPreference, fitPreference } = userProfile;
+  const normalize = (val) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map(v => (v || "").toString().toLowerCase().trim());
+    return [(val || "").toString().toLowerCase().trim()];
+  };
 
-  // Gender is filtered BEFORE scoring (see filteredOutfits logic below).
-  // We keep scoring logic gender-agnostic to avoid wasting compute and to guarantee
-  // the frontend never receives mismatched outfits.
+  const userGenderRaw = normalize(gender);
+  const userGender =
+    userGenderRaw.some((g) => ["men", "man", "male", "m"].includes(g)) ? "men" :
+      userGenderRaw.some((g) => ["women", "woman", "female", "f"].includes(g)) ? "women" :
+        "";
+  
+  const userOccasions = normalize(occasion);
+  const userStyles = normalize(stylePreference);
+  const userSeasons = normalize(seasonOrWeather);
+  const userColors = normalize(colorPreference);
+  const userBodyShape = (bodyShape || "").toString().toLowerCase().trim();
+  const userFit = normalize(fitPreference);
 
-  // Body type match -> +3
-  const userBodyShape = (bodyShape || "").toString().toLowerCase();
-  const dbBodyTypes = outfit.suitable_body_types || outfit.suitable_body_type || [];
-  if (userBodyShape && dbBodyTypes.some(bt => userBodyShape.includes((bt || "").toString().toLowerCase()) || (bt || "").toString().toLowerCase().includes(userBodyShape))) {
-    score += 3;
-    reasons.push("flatters your body type");
+  const intersects = (arr1, arr2) => arr1.some(a => a && arr2.some(b => b && (a.includes(b) || b.includes(a))));
+
+  // Phase 1: FAST FILTERING
+  let filtered = dbOutfits.filter(outfit => {
+    const g = outfit?.gender;
+    const dbGenders = Array.isArray(g) ? g : (typeof g === "string" ? [g] : []);
+    const normGenders = dbGenders.map(x => (x || "").toString().toLowerCase().trim());
+    if (normGenders.length === 0) return true; // missing => treat as unisex
+    if (normGenders.includes("unisex") || normGenders.includes("all")) return true;
+    if (!userGender) return false; // unknown user gender => don't include gendered outfits
+    return normGenders.includes(userGender);
+  });
+
+  // Strict Phase 2: Occasion filtering strictly
+  let strictFiltered = filtered.filter(outfit => {
+    const dbOccasions = normalize(outfit.occasion);
+    if (userOccasions.length > 0 && dbOccasions.length > 0) {
+      return intersects(userOccasions, dbOccasions);
+    }
+    return true; 
+  });
+
+  if (strictFiltered.length < 8) {
+    console.log(`[Recommendation] Only ${strictFiltered.length} items passing strict occasion filtering. Relaxing occasion filter for fallback.`);
+    strictFiltered = filtered; // fallback to gender-only filter
   }
 
-  // Season match -> +2
-  const userSeason = (seasonOrWeather || colorSeason || "").toString().toLowerCase();
-  const dbSeasons = outfit.seasons || outfit.weather || [];
-  if (userSeason && dbSeasons.some(s => {
-    const sStr = (s || "").toString().toLowerCase();
-    return userSeason.includes(sStr) || sStr.includes(userSeason) ||
-      (userSeason.includes("summer") && sStr.includes("hot")) ||
-      (userSeason.includes("winter") && sStr.includes("cold"));
-  })) {
-    score += 2;
-    reasons.push("perfect for the season/weather");
+  // Phase 3: SCORING
+  let scoredOutfits = strictFiltered.map(outfit => {
+    let score = 0;
+    let reasons = [];
+
+    const dbOccasions = normalize(outfit.occasion);
+    const dbStyles = normalize(outfit.style_tags);
+    const dbSeasons = normalize(outfit.seasons).concat(normalize(outfit.weather));
+    const dbColors = normalize(outfit.colors);
+    const dbBodyTypes = normalize(outfit.suitable_body_types).concat(normalize(outfit.suitable_body_type));
+    const dbFit = normalize(outfit.fit);
+
+    // Occasion (+40 or -50)
+    if (userOccasions.length > 0 && dbOccasions.length > 0) {
+      if (intersects(userOccasions, dbOccasions)) {
+        score += 40;
+        reasons.push("perfectly matches your occasion");
+      } else {
+        score -= 50;
+      }
+    }
+
+    // Style (+30 or -30)
+    if (userStyles.length > 0 && dbStyles.length > 0) {
+      if (intersects(userStyles, dbStyles)) {
+        score += 30;
+        reasons.push("fits your chosen style");
+      } else {
+        score -= 30; // Mismatched style penalization
+      }
+    }
+
+    // Body Type (+20)
+    if (userBodyShape && dbBodyTypes.length > 0) {
+      if (dbBodyTypes.some(bt => userBodyShape.includes(bt) || bt.includes(userBodyShape))) {
+        score += 20;
+        reasons.push("flatters your body shape");
+      }
+    }
+
+    // Season (+15)
+    if (userSeasons.length > 0 && dbSeasons.length > 0) {
+      if (intersects(userSeasons, dbSeasons) || (userSeasons.includes("summer") && dbSeasons.includes("hot")) || (userSeasons.includes("winter") && dbSeasons.includes("cold"))) {
+        score += 15;
+        reasons.push("ideal for the weather/season");
+      }
+    }
+
+    // Colors (+10)
+    if (userColors.length > 0 && dbColors.length > 0) {
+      if (intersects(userColors, dbColors)) {
+        score += 10;
+        reasons.push("in your preferred color palette");
+      }
+    }
+
+    // Fit (+5)
+    if (userFit.length > 0 && dbFit.length > 0) {
+      if (intersects(userFit, dbFit)) {
+        score += 5;
+      }
+    }
+
+    let reasonsString = reasons.length > 0 ? reasons.join(" and ") : "A great addition to your wardrobe";
+    if (reasonsString.length > 120) {
+      reasonsString = reasons.slice(0, 3).join(", ") + " and more";
+    }
+    reasonsString = reasonsString.charAt(0).toUpperCase() + reasonsString.slice(1) + ".";
+
+    let finalImageUrl = outfit.imageUrl || `/outfit_img/${outfit._id}.jpg`;
+
+    return {
+      id: outfit._id || outfit.id,
+      _id: outfit._id,
+      type: outfit.type || "Outfit",
+      category: outfit.category || "",
+      link: outfit.link,
+      imageUrl: finalImageUrl,
+      matchReasons: reasonsString,
+      score: score
+    };
+  });
+
+  // Filter heavily penalized outfits (meaning completely irrelevant)
+  scoredOutfits = scoredOutfits.filter(o => o.score > -20);
+
+  if (scoredOutfits.length === 0) {
+     console.log("[Recommendation] Extreme fallback hit. No outfits passed threshold.");
+     scoredOutfits = filtered.map(o => ({ ...o, score: 0, id: o._id, type: o.type||"Outfit", imageUrl: o.imageUrl || `/outfit_img/${o._id}.jpg` }));
   }
 
-  // Occasion match -> +2
-  const userOccasion = (occasion || "").toString().toLowerCase();
+  // Phase 4: SORTING
+  scoredOutfits.sort((a, b) => b.score - a.score);
 
-  let outfitOccasionMatch = false;
-  if (userOccasion && outfit.occasion) {
-    if (Array.isArray(outfit.occasion)) {
-      outfitOccasionMatch = outfit.occasion.some(o => (o || "").toString().toLowerCase().includes(userOccasion));
-    } else {
-      outfitOccasionMatch = (outfit.occasion || "").toString().toLowerCase().includes(userOccasion);
+  // Normalize scores to be out of 10 for the UI
+  // Best score could be up to 120, we can linearly scale and cap it
+  scoredOutfits.forEach(o => {
+    let normalized = Math.round((Math.max(0, o.score) / 120) * 10);
+    // Even an okay match should score decently to prevent demoralizing UI
+    o.score = Math.min(10, Math.max(6, normalized)); 
+  });
+
+  // Phase 5: DIVERSITY & SHUFFLING
+  let topCandidates = scoredOutfits.slice(0, 15);
+  for (let i = topCandidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [topCandidates[i], topCandidates[j]] = [topCandidates[j], topCandidates[i]];
+  }
+
+  return topCandidates.slice(0, 10);
+}
+
+// Helper functions for OOTD
+function hasCommonStyle(a, b) {
+  if (!a || !b) return false;
+  return a.some(tag => b.includes(tag));
+}
+
+function isNeutral(colors) {
+  if (!colors) return false;
+  const neutrals = ["black", "white", "beige", "grey", "navy"];
+  return colors.some(c => neutrals.includes(c.toLowerCase()));
+}
+
+function hasColorContrast(a, b) {
+  if (!a || !b) return false;
+  return a.some(c1 => b.some(c2 => c1 !== c2));
+}
+
+function sameColorFamily(a, b) {
+  if (!a || !b) return false;
+  return a.some(c => b.includes(c));
+}
+
+function generateOOTD(dbOutfits, userProfile) {
+  const normalize = (val) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map(v => (v || "").toString().toLowerCase().trim());
+    return [(val || "").toString().toLowerCase().trim()];
+  };
+
+  const userGenderRaw = normalize(userProfile.gender);
+  const userGender =
+    userGenderRaw.some((g) => ["men", "man", "male", "m"].includes(g)) ? "men" :
+      userGenderRaw.some((g) => ["women", "woman", "female", "f"].includes(g)) ? "women" :
+        "";
+        
+  const userOccasions = normalize(userProfile.occasion);
+  const userStyles = normalize(userProfile.stylePreference);
+
+  // Extract History for Repetition Rule
+  const recentHistory = userProfile.history || [];
+  const recentOotdIds = recentHistory.flatMap(h => {
+      const matches = [];
+      if(h.analysisData && h.analysisData.dbOutfits) {
+          h.analysisData.dbOutfits.forEach(o => matches.push(o.id || o._id));
+      }
+      return matches;
+  }).map(id => (id || "").toString());
+
+  const intersects = (arr1, arr2) => arr1.some(a => a && arr2.some(b => b && (a.includes(b) || b.includes(a))));
+
+  const isTop = (cat) => {
+    const c = cat ? cat.toLowerCase().trim() : "";
+    return c.includes("top") || c.includes("shirt") || c.includes("blouse") || c.includes("sweater") || c.includes("jacket") || c.includes("hoodie");
+  };
+  const isBottom = (cat) => {
+    const c = cat ? cat.toLowerCase().trim() : "";
+    return c.includes("bottom") || c.includes("pant") || c.includes("jean") || c.includes("trouser") || c.includes("skirt") || c.includes("short");
+  };
+  const isFull = (cat) => {
+    const c = cat ? cat.toLowerCase().trim() : "";
+    return c.includes("dress") || c.includes("jumpsuit") || c.includes("bodysuit") || c.includes("gown") || c.includes("full");
+  };
+
+  // STEP 1: SPLIT OUTFITS
+  let tops = dbOutfits.filter(o => {
+    const g = o?.gender;
+    const norm = normalize(g);
+    if (norm.length > 0 && !norm.includes("unisex") && !norm.includes("all")) { if (!userGender || !norm.includes(userGender)) return false; }
+    return isTop(o.category) || isTop(o.type);
+  });
+
+  let bottoms = dbOutfits.filter(o => {
+    const g = o?.gender;
+    const norm = normalize(g);
+    if (norm.length > 0 && !norm.includes("unisex") && !norm.includes("all")) { if (!userGender || !norm.includes(userGender)) return false; }
+    return isBottom(o.category) || isBottom(o.type);
+  });
+
+  let fullOutfits = dbOutfits.filter(o => {
+    const g = o?.gender;
+    const norm = normalize(g);
+    if (norm.length > 0 && !norm.includes("unisex") && !norm.includes("all")) { if (!userGender || !norm.includes(userGender)) return false; }
+    const occs = normalize(o.occasion);
+    const occMatch = userOccasions.length === 0 || intersects(occs, userOccasions);
+    return occMatch && (isFull(o.category) || isFull(o.type));
+  });
+
+  // STEP 2 & 3: FULL OUTFIT DECISION
+  const useFullOutfit = fullOutfits.length > 0 && Math.random() < 0.3;
+  if (useFullOutfit) {
+    const scoredFull = getSmartRecommendations(fullOutfits, userProfile);
+    if (scoredFull.length > 0) {
+        return {
+           type: "full",
+           ...scoredFull[0] // Spread to cleanly expose .imageUrl for frontend fallback support
+        };
     }
   }
 
-  if (outfitOccasionMatch) {
-    score += 2;
-    reasons.push("matches your occasion");
+  // STEP 4: STRICT OCCASION (With intelligent fallback if DB is mismatched)
+  let validTops = tops.filter(o => userOccasions.length === 0 || intersects(normalize(o.occasion), userOccasions));
+  let validBottoms = bottoms.filter(o => userOccasions.length === 0 || intersects(normalize(o.occasion), userOccasions));
+
+  // Fallback: If 0 tops perfectly match the occasion, relax Occasion and rely purely on the User Style subsets
+  if (validTops.length === 0) validTops = tops;
+  if (validBottoms.length === 0) validBottoms = bottoms;
+
+  // STEP 5: STYLE FILTER (SOFT)
+  const styledTops = validTops.filter(o => intersects(normalize(o.style_tags), userStyles));
+  const styledBottoms = validBottoms.filter(o => intersects(normalize(o.style_tags), userStyles));
+
+  // STEP 6: SCORE ITEMS
+  const scoredTops = getSmartRecommendations(styledTops.length ? styledTops : validTops, userProfile).slice(0, 5);
+  const scoredBottoms = getSmartRecommendations(styledBottoms.length ? styledBottoms : validBottoms, userProfile).slice(0, 5);
+
+  console.log(`[generateOOTD] Scored tops: ${scoredTops.length}, Scored bottoms: ${scoredBottoms.length}`);
+
+  // STEP 7 & 8: COMBINATION LOGIC
+  let bestCombo = null;
+  let bestScore = -Infinity;
+
+  for (let top of scoredTops) {
+    for (let bottom of scoredBottoms) {
+      const rawTop = dbOutfits.find(o => (o._id || o.id).toString() === top.id.toString()) || {};
+      const rawBottom = dbOutfits.find(o => (o._id || o.id).toString() === bottom.id.toString()) || {};
+
+      let score = top.score + bottom.score;
+      
+      const tOccasions = normalize(rawTop.occasion);
+      const bOccasions = normalize(rawBottom.occasion);
+      const tStyles = normalize(rawTop.style_tags);
+      const bStyles = normalize(rawBottom.style_tags);
+      const tColors = normalize(rawTop.colors);
+      const bColors = normalize(rawBottom.colors);
+      const tFit = normalize(rawTop.fit)[0] || "";
+      const bFit = normalize(rawBottom.fit)[0] || "";
+      const tBody = normalize(rawTop.suitable_body_types);
+      const bBody = normalize(rawBottom.suitable_body_types);
+
+      // RULE 1: SILHOUETTE BALANCE
+      if (tFit === "fitted" && bFit === "loose") score += 25;
+      if (tFit === "loose" && bFit === "fitted") score += 25;
+      if (tFit === "loose" && bFit === "loose") score -= 15;
+
+      // RULE 2: COLOR HARMONY
+      if (isNeutral(tColors) || isNeutral(bColors)) score += 20;
+      if (hasColorContrast(tColors, bColors)) score += 15;
+      if (sameColorFamily(tColors, bColors)) score += 10;
+
+      // RULE 3: STYLE CONSISTENCY
+      if (hasCommonStyle(tStyles, bStyles)) {
+          score += 20;
+      } else {
+          score -= 10;
+      }
+
+      // RULE 4: BODY TYPE MATCH
+      const uBodyType = (userProfile.bodyShape || "").toLowerCase();
+      if (uBodyType) {
+          if (tBody.includes(uBodyType)) score += 10;
+          if (bBody.includes(uBodyType)) score += 10;
+      }
+
+      // RULE 5: UNIVERSAL ITEMS BOOST
+      if (rawBottom.isUniversal === true || rawBottom.isUniversal === "true") score += 12;
+
+      // RULE 6: REPETITION CONTROL
+      if (recentOotdIds.includes((bottom.id||"").toString())) score -= 25;
+      if (recentOotdIds.includes((top.id||"").toString())) score -= 20;
+
+      // RULE 7: HARD PENALTY (Occasion)
+      if (userOccasions.length > 0) {
+          if (!intersects(tOccasions, userOccasions)) score -= 50;
+          if (!intersects(bOccasions, userOccasions)) score -= 50;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        let displayScore = Math.min(10, Math.round((Math.max(1, score) / 100) * 10)); 
+        if(score > 100) displayScore = 10;
+
+        bestCombo = { 
+          top, 
+          bottom, 
+          score: displayScore,
+          matchReasons: "Professionally curated style balancing your " + (userOccasions[0]||"occasion") + " preference and body shape."
+        };
+      }
+    }
   }
 
-  // Style preference match -> +1 (supports single string or array)
-  const userStyles = Array.isArray(stylePreference)
-    ? stylePreference.map(s => (s || "").toString().toLowerCase())
-    : [(stylePreference || "").toString().toLowerCase()];
-  const dbStyles = outfit.style_tags || [];
-  if (userStyles.some(userStyle => userStyle && dbStyles.some(st =>
-    (st || "").toString().toLowerCase().includes(userStyle) || userStyle.includes((st || "").toString().toLowerCase())
-  ))) {
-    score += 1;
-    reasons.push("fits your style preference");
+  if (bestCombo) {
+     return {
+        type: "combo",
+        ...bestCombo
+     };
+  } else if (tops.length > 0 && bottoms.length > 0) {
+      console.log(`[generateOOTD] Fallback combo selection.`);
+      return { 
+          type: "combo",
+          top: tops[0], 
+          bottom: bottoms[0], 
+          score: 7,
+          matchReasons: "AI curated smart pair based off available wardrobe matches."
+      };
   }
 
-  // Color preference match -> +1 (supports single string or array)
-  const userColors = Array.isArray(colorPreference)
-    ? colorPreference.map(c => (c || "").toString().toLowerCase())
-    : [(colorPreference || "").toString().toLowerCase()];
-  const dbColors = outfit.colors || [];
-  if (userColors.some(userColor => userColor && dbColors.some(c =>
-    userColor.includes((c || "").toString().toLowerCase()) || (c || "").toString().toLowerCase().includes(userColor)
-  ))) {
-    score += 1;
-    reasons.push("matches your color preference");
-  }
-
-  // Neckline match -> +1
-  const recommendedNecklines = Array.isArray(necklines?.recommended) ? necklines.recommended.map(n => (n || "").toString().toLowerCase()) : [];
-  const dbNecklines = outfit.necklines || [];
-  if (recommendedNecklines.length > 0 && dbNecklines.some(n => {
-    const nStr = (n || "").toString().toLowerCase();
-    return recommendedNecklines.some(rec => rec.includes(nStr) || nStr.includes(rec));
-  })) {
-    score += 1;
-    reasons.push("features a recommended neckline");
-  }
-
-  let reasonsString = reasons.length > 0 ? reasons.join(" and ") : "A great addition to your wardrobe";
-  if (reasonsString.length > 120) {
-    reasonsString = reasons.slice(0, 3).join(", ") + " and more";
-  }
-  reasonsString = reasonsString.charAt(0).toUpperCase() + reasonsString.slice(1) + ".";
-
-  return { score, matchReasons: reasonsString };
+  // Final edge case fallback if fully empty
+  return getSmartRecommendations(dbOutfits, userProfile)[0] || null;
 }
 
 app.post("/analyze-style", async (req, res) => {
@@ -434,6 +871,42 @@ app.post("/analyze-style", async (req, res) => {
       return res.status(500).json({
         error: "GEMINI_API_KEY missing in .env"
       });
+    }
+
+    // CACHING BLOCK: Avoid hitting pipeline if no new image is provided
+    let dbUser = null;
+    if (userId) {
+       dbUser = await User.findById(userId).lean();
+       if (dbUser && dbUser.profileAnalyzed && dbUser.analysis && !image) {
+           console.log(`[Cache Hit] Returning cached analysis for user ${userId}. Bypassing Gemini/Python pipeline.`);
+           let analysis = dbUser.analysis;
+           
+           try {
+             const dbOutfits = await Outfit.find({}).lean();
+             const rawUserGender = (req.body?.userGender || gender || dbUser.gender || "").toString().toLowerCase().trim();
+             const userGender = ["men", "man", "male", "m"].includes(rawUserGender) ? "men" : ["women", "woman", "female", "f"].includes(rawUserGender) ? "women" : "";
+
+             const userProfile = {
+               gender: userGender,
+               bodyShape: analysis.bodyShape,
+               colorSeason: analysis.colorSeason,
+               necklines: analysis.necklines,
+               occasion,
+               seasonOrWeather,
+               stylePreference,
+               colorPreference,
+               fitPreference
+             };
+
+             const recommended = getSmartRecommendations(dbOutfits, userProfile);
+             analysis.dbOutfits = recommended.slice(0, 5);
+           } catch (e) {
+             analysis.dbOutfits = [];
+           }
+           
+           // Natively return without running APIs
+           return res.json(analysis);
+       }
     }
 
     const parsedImage = parseImageBase64(image);
@@ -494,6 +967,8 @@ CRITICAL RULES:
 4. Assign the EXACT 12-season category (e.g., Light Spring, Soft Summer, True Winter, Dark Autumn).
 5. Ensure color recommendations are extremely personalized to their specific season. Avoid generic colors.
 6. Jewelry MUST match undertone strictly (Cool = Silver/White Gold; Warm = Gold/Brass; Neutral = Rose Gold/Mixed).
+7. You MUST be deterministic. Given the same image, always return the same classification. Do not vary between similar categories.
+8. All outputs MUST strictly belong to predefined standard categories.
 
 Return ONLY a valid JSON object with the exact following structure. Do not include markdown formatting like \`\`\`json.
 {
@@ -559,7 +1034,10 @@ Detected Contrast Level: ${pyContrastLevel}
         }
       ],
       generationConfig: {
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        temperature: 0.2,
+        topP: 0.8,
+        topK: 40
       }
     };
 
@@ -614,6 +1092,17 @@ Detected Contrast Level: ${pyContrastLevel}
     }
 
     const analysis = parsed.value;
+
+    // Normalize Gemini output for consistency locking and strict casing limits
+    const toTitleCase = (str) => {
+      if (!str || typeof str !== 'string') return str;
+      return str.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+    };
+    analysis.undertone = toTitleCase(analysis.undertone);
+    analysis.contrastLevel = toTitleCase(analysis.contrastLevel);
+    analysis.colorSeason = toTitleCase(analysis.colorSeason);
+    analysis.bodyShape = toTitleCase(analysis.bodyShape);
+    analysis.faceShape = toTitleCase(analysis.faceShape);
 
     if (process.env.GROQ_API_KEY) {
 
@@ -707,21 +1196,12 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
 
     // --- DB OUTFITS MATCHING LOGIC ---
     try {
-      const dbOutfits = await Outfit.find({});
+      const dbOutfits = await Outfit.find({}).lean(); // Critical fix: Output pure javascript objects, bypassing heavy classes causing CastErrors.
       const rawUserGender = (req.body?.userGender || gender || "").toString().toLowerCase().trim();
-      const userGender = rawUserGender === "men" || rawUserGender === "women" ? rawUserGender : "";
-
-      const filteredOutfits = dbOutfits.filter((outfit) => {
-        const g = outfit?.gender;
-        // Defensive: missing gender => treat as unisex
-        const genders = Array.isArray(g) ? g : (typeof g === "string" ? [g] : []);
-        if (genders.length === 0) return true;
-
-        const normalized = genders.map((x) => (x || "").toString().toLowerCase().trim());
-        if (normalized.includes("unisex")) return true;
-        if (!userGender) return true;
-        return normalized.includes(userGender);
-      });
+      const userGender =
+        ["men", "man", "male", "m"].includes(rawUserGender) ? "men" :
+          ["women", "woman", "female", "f"].includes(rawUserGender) ? "women" :
+            "";
 
       const userProfile = {
         gender: userGender,
@@ -735,32 +1215,15 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
         fitPreference
       };
 
-      const scoredOutfits = filteredOutfits.map(outfit => {
-        const { score, matchReasons } = calculateOutfitScore(outfit, userProfile);
-
-        // determine the correct image URL if imageUrl exists on the document or fallback to local
-        let finalImageUrl = outfit.imageUrl || `/outfit_img/${outfit._id}.jpg`;
-
-        return {
-          id: outfit._id,
-          type: outfit.type || "Outfit",
-          category: outfit.category || "",
-          link: outfit.link,
-          imageUrl: finalImageUrl,
-          matchReasons,
-          score
-        };
-      });
-
-      // Sort outfits by highest score first
-      scoredOutfits.sort((a, b) => b.score - a.score);
-
-      // Take top 5 recommendations
-      analysis.dbOutfits = scoredOutfits.slice(0, 5);
+      const recommended = getSmartRecommendations(dbOutfits, userProfile);
+      
+      // Top 5 purely for immediate analysis display
+      analysis.dbOutfits = recommended.slice(0, 5);
 
       // Save to User collection if userId is provided
       if (userId) {
         const updateData = {
+          gender: userGender || "unisex",
           profileAnalyzed: true,
           analysis: {
             skinTone: analysis.skinTone,
@@ -784,7 +1247,57 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
             fitPreference: (Array.isArray(fitPreference) ? fitPreference : (fitPreference ? [fitPreference] : [])).filter(v => v && v !== "No Preference")
           }
         };
-        await User.findByIdAndUpdate(userId, updateData, { new: true });
+        
+        const newHistoryEntry = {
+          date: new Date(),
+          season: analysis.colorSeason || "Unknown",
+          undertone: analysis.undertone || "Unknown",
+          ootdUrl: analysis.dbOutfits?.[0]?.imageUrl || "",
+          analysisData: analysis
+        };
+
+        await User.findByIdAndUpdate(userId, {
+          $set: updateData,
+          $push: {
+            history: {
+              $each: [newHistoryEntry],
+              $position: 0,
+              $slice: 10
+            }
+          }
+        }, { new: true });
+
+        // -- Dedicated Tab Save --
+        try {
+            const occasionName = (Array.isArray(occasion) ? occasion[0] : occasion) || "Style";
+            await AnalysisHistory.create({
+              userId: userId,
+              analysisName: `${occasionName.charAt(0).toUpperCase() + occasionName.slice(1)} Look`,
+              faceShape: analysis.faceShape,
+              bodyShape: analysis.bodyShape,
+              skinTone: analysis.skinTone,
+              undertone: analysis.undertone,
+              contrastLevel: analysis.contrastLevel,
+              bestColors: analysis.bestNeutrals ? [...analysis.bestNeutrals, ...(analysis.bestAccentColors || [])] : [],
+              avoidColors: analysis.avoidColors || [],
+              recommendedOutfits: (analysis.dbOutfits || []).map(o => ({
+                outfitId: o.id || o._id,
+                type: o.type || o.category || "Outfit",
+                imageUrl: o.imageUrl,
+                link: o.link,
+                score: o.score
+              }))
+            });
+
+            // Keep only last 5
+            const analyses = await AnalysisHistory.find({ userId }).sort({ createdAt: -1 });
+            if (analyses.length > 5) {
+              const idsToDelete = analyses.slice(5).map(a => a._id);
+              await AnalysisHistory.deleteMany({ _id: { $in: idsToDelete } });
+            }
+        } catch (hErr) {
+            console.error("Error updating AnalysisHistory coll:", hErr);
+        }
       }
 
     } catch (err) {
@@ -825,7 +1338,7 @@ app.get("/api/dashboard/:userId", async (req, res) => {
 
     // Prepare user profile for scoring — pass full arrays so all selected preferences influence results
     const userProfile = {
-      gender: "unisex",
+      gender: user.gender || "unisex",
       bodyShape: user.analysis?.bodyShape || "",
       colorSeason: user.analysis?.colorSeason || "",
       necklines: user.analysis?.necklines || { recommended: [] },
@@ -839,40 +1352,22 @@ app.get("/api/dashboard/:userId", async (req, res) => {
 
     const dbOutfits = await Outfit.find({});
 
-    // Filter outfits by gender (we will default to unisex matching since gender wasn't strictly added to the user model schema earlier)
-    const filteredOutfits = dbOutfits; // All outfits, since gender is tricky without explicit user record
-
-    const scoredOutfits = filteredOutfits.map(outfit => {
-      const { score, matchReasons } = calculateOutfitScore(outfit, userProfile);
-      let finalImageUrl = outfit.imageUrl || `/outfit_img/${outfit._id}.jpg`;
-      return {
-        _id: outfit._id,
-        type: outfit.type || "Outfit",
-        category: outfit.category || "",
-        link: outfit.link,
-        imageUrl: finalImageUrl,
-        matchReasons,
-        score
-      };
-    });
-
-    // Sort descending by score
-    scoredOutfits.sort((a, b) => b.score - a.score);
-
-    // Get Recommendations (top 10)
-    const recommendedOutfits = scoredOutfits.slice(0, 10);
-
-    // Get OOTD (Random high scoring, e.g. from top 5)
-    let outfitOfTheDay = null;
-    if (scoredOutfits.length > 0) {
-      const topCount = Math.min(5, scoredOutfits.length);
-      const randomIndex = Math.floor(Math.random() * topCount);
-      outfitOfTheDay = scoredOutfits[randomIndex];
+    const allRecommendations = getSmartRecommendations(dbOutfits, userProfile);
+    
+    const outfitOfTheDay = generateOOTD(dbOutfits, userProfile);
+    let recommendedOutfits = [...allRecommendations];
+    
+    if (outfitOfTheDay) {
+        // filter out the top and bottom from recommendations to avoid duplicates
+        recommendedOutfits = recommendedOutfits.filter(o => 
+            o.id !== outfitOfTheDay.top?.id && o.id !== outfitOfTheDay.bottom?.id
+        );
     }
 
     // Construct Response
     return res.json({
       success: true,
+      userName: user.name,
       userAnalysis: user.analysis,
       styleInsights: {
         season: user.analysis?.colorSeason || "Unknown",
@@ -882,12 +1377,119 @@ app.get("/api/dashboard/:userId", async (req, res) => {
         necklines: user.analysis?.necklines?.recommended || [],
       },
       outfitOfTheDay,
-      recommendedOutfits
+      recommendedOutfits,
+      stylingHistory: user.history || [],
+      likedOutfits: user.likedOutfits || []
     });
 
   } catch (error) {
     console.error("Dashboard error:", error);
     res.status(500).json({ error: "Failed to load dashboard data" });
+  }
+});
+
+// GET /api/analysis-history/:userId
+app.get("/api/analysis-history/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const history = await AnalysisHistory.find({ userId })
+      .sort({ createdAt: -1 })
+      .select("_id analysisName createdAt");
+    res.json(history);
+  } catch (error) {
+    console.error("Fetch history summary error:", error);
+    res.status(500).json({ error: "Failed to fetch history list" });
+  }
+});
+
+// GET /api/analysis-history/detail/:id
+app.get("/api/analysis-history/detail/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const detail = await AnalysisHistory.findById(id);
+    if (!detail) return res.status(404).json({ error: "Analysis not found" });
+    res.json(detail);
+  } catch (error) {
+    console.error("Fetch history detail error:", error);
+    res.status(500).json({ error: "Failed to fetch history detail" });
+  }
+});
+
+// POST /virtual-tryon
+app.post("/virtual-tryon", async (req, res) => {
+  try {
+    const { personImage, outfitImage, category } = req.body;
+
+    if (!personImage || !outfitImage) {
+      return res.status(400).json({ error: "Both personImage and outfitImage are required" });
+    }
+
+    if (!process.env.FASHN_API_KEY) {
+      return res.status(500).json({ error: "Internal Server Error: Missing FASHN_API_KEY in environment" });
+    }
+
+    const payload = {
+      model_name: "tryon-v1.6",
+      inputs: {
+        model_image: personImage,
+        garment_image: outfitImage,
+        category: category || "tops"
+      }
+    };
+
+    // 1. Submit Job to Fashn.ai
+    const response = await axios.post("https://api.fashn.ai/v1/run", payload, {
+      headers: {
+        "Authorization": `Bearer ${process.env.FASHN_API_KEY}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const jobId = response.data?.id;
+    if (!jobId) {
+      return res.status(500).json({ error: "Failed to receive a valid Job ID from FASHN.ai" });
+    }
+
+    // 2. Asynchronous Polling
+    let status = "starting";
+    let attempts = 0;
+    const maxAttempts = 30; // Max ~90 seconds
+
+    while (status !== "completed" && status !== "failed" && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      attempts++;
+
+      const check = await axios.get(`https://api.fashn.ai/v1/status/${jobId}`, {
+        headers: {
+          "Authorization": `Bearer ${process.env.FASHN_API_KEY}`
+        }
+      });
+      
+      status = check.data?.status || status;
+
+      if (status === "completed") {
+         const resultImage = check.data?.output?.[0]; 
+         if(!resultImage) {
+           return res.status(500).json({ error: "FASHN.ai completed successfully but returned no image" });
+         }
+         return res.json({ success: true, resultImage });
+      }
+
+      if (status === "failed") {
+          return res.status(500).json({ error: "FASHN.ai job failed during processing" });
+      }
+    }
+
+    if (attempts >= maxAttempts) {
+      return res.status(504).json({ error: "Virtual Try-on request timed out while polling the model" });
+    }
+
+  } catch (error) {
+    console.error("Virtual Try-on Error:", error?.response?.data || error.message);
+    res.status(500).json({
+      error: "Virtual try-on failed",
+      details: error?.response?.data?.error?.message || error?.response?.data?.message || error.message
+    });
   }
 });
 

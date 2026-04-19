@@ -16,6 +16,7 @@ import {
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -91,6 +92,7 @@ const AuthScreen = ({ navigation }) => {
       const response = await axios.post(`${API_BASE_URL}${endpoint}`, payload);
 
       if (response.data.success) {
+        await AsyncStorage.setItem('userId', response.data.userId);
         navigation.navigate('Main', { screen: 'DashboardRoot', params: { userId: response.data.userId } });
       }
     } catch (error) {

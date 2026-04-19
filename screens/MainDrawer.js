@@ -2,16 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItem, DrawerItemList } from '@react-navigation/drawer';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import DashboardScreen from './DashboardScreen';
+import HistoryScreen from './HistoryScreen';
+import MyStyleProfileScreen from './MyStyleProfileScreen';
+import GenerateOutfitScreen from './GenerateOutfitScreen';
+import SettingsScreen from './SettingsScreen';
+import AIChatbotScreen from './AIChatbotScreen';
+import VirtualTryonScreen from './VirtualTryonScreen';
 
 const Drawer = createDrawerNavigator();
 
-// Dummy Screens for placing in Drawer
-const DummyScreen = ({ name }) => (
-    <View style={styles.dummyContainer}>
-        <Ionicons name="construct-outline" size={48} color="#ccc" />
-        <Text style={styles.dummyText}>{name} Screen coming soon...</Text>
-    </View>
-);
 
 const CustomDrawerContent = (props) => {
     return (
@@ -33,7 +32,7 @@ const CustomDrawerContent = (props) => {
                     onPress={() => {
                         Alert.alert("Logout", "Are you sure you want to log out?", [
                             { text: "Cancel", style: "cancel" },
-                            { text: "Logout", style: 'destructive', onPress: () => props.navigation.replace('Landing') }
+                            { text: "Logout", style: 'destructive', onPress: () => props.navigation.replace('Auth') }
                         ]);
                     }}
                 />
@@ -65,15 +64,15 @@ export default function MainDrawer() {
             />
             <Drawer.Screen
                 name="MyStyleProfile"
-                component={() => <DummyScreen name="My Style Profile" />}
+                component={MyStyleProfileScreen}
                 options={{
-                    title: 'My Style Profile',
-                    drawerIcon: ({ color, size }) => <Ionicons name="person-outline" size={size} color={color} />
+                    title: 'Liked Outfits',
+                    drawerIcon: ({ color, size }) => <Ionicons name="heart-outline" size={size} color={color} />
                 }}
             />
             <Drawer.Screen
                 name="GenerateOutfit"
-                component={() => <DummyScreen name="Generate Outfit" />}
+                component={GenerateOutfitScreen}
                 options={{
                     title: 'Generate Outfit',
                     drawerIcon: ({ color, size }) => <Ionicons name="color-wand-outline" size={size} color={color} />
@@ -81,7 +80,7 @@ export default function MainDrawer() {
             />
             <Drawer.Screen
                 name="History"
-                component={() => <DummyScreen name="History" />}
+                component={HistoryScreen}
                 options={{
                     title: 'History',
                     drawerIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} />
@@ -89,10 +88,26 @@ export default function MainDrawer() {
             />
             <Drawer.Screen
                 name="Settings"
-                component={() => <DummyScreen name="Settings" />}
+                component={SettingsScreen}
                 options={{
                     title: 'Settings',
                     drawerIcon: ({ color, size }) => <Ionicons name="settings-outline" size={size} color={color} />
+                }}
+            />
+            <Drawer.Screen
+                name="AIChatbot"
+                component={AIChatbotScreen}
+                options={{
+                    title: 'AI Chatbot',
+                    drawerIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" size={size} color={color} />
+                }}
+            />
+            <Drawer.Screen
+                name="VirtualTryon"
+                component={VirtualTryonScreen}
+                options={{
+                    title: 'Virtual Tryon',
+                    drawerIcon: ({ color, size }) => <Ionicons name="shirt-outline" size={size} color={color} />
                 }}
             />
         </Drawer.Navigator>
@@ -127,17 +142,6 @@ const styles = StyleSheet.create({
         fontSize: 22,
         fontWeight: '700',
         color: '#25344F'
-    },
-    dummyContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#D5B893'
-    },
-    dummyText: {
-        fontSize: 18,
-        color: '#6F4D38',
-        marginTop: 16,
     },
     logoutSection: {
         borderTopWidth: 1,

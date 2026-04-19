@@ -15,6 +15,7 @@ import ResultsScreen from './screens/ResultsScreen';
 // ✅ ADD THESE IMPORTS
 import PreferencesScreen from './screens/PreferencesScreen';
 import UploadScreen from './screens/UploadScreen';
+import HistoryDetailScreen from './screens/HistoryDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -38,6 +39,7 @@ export default function App() {
 
           <Stack.Screen name="Loading" component={LoadingScreen} />
           <Stack.Screen name="Results" component={ResultsScreen} />
+          <Stack.Screen name="HistoryDetail" component={HistoryDetailScreen} />
           <Stack.Screen name="Main" component={MainDrawer} />
         </Stack.Navigator>
 

@@ -15,6 +15,7 @@ const MOCK_INSIGHTS = {
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { getWardrobeEssentials } from '../constants/wardrobeEssentials';
+import OutfitDetailsModal from '../components/OutfitDetailsModal';
 
 export default function DashboardScreen({ navigation, route }) {
     const userId = route?.params?.userId || null;
@@ -23,6 +24,73 @@ export default function DashboardScreen({ navigation, route }) {
     const [ootd, setOotd] = useState(null);
     const [recommendations, setRecommendations] = useState([]);
     const [stylingHistory, setStylingHistory] = useState([]);
+    const [modalVisible, setModalVisible] = useState(false);
+    const [selectedOutfit, setSelectedOutfit] = useState(null);
+    const [isLiked, setIsLiked] = useState(false);
+
+    const handleOpenModal = (outfit) => {
+        if (!outfit) return;
+        setSelectedOutfit(outfit);
+        
+        // Check if liked from profile
+        const outfitIdStr = (outfit.id || outfit._id || "").toString();
+        const liked = profile?.likedOutfits?.some(lo => lo.outfitId === outfitIdStr) || false;
+        
+        setIsLiked(liked);
+        setModalVisible(true);
+    };
+
+    const handleToggleLike = async () => {
+        if (!userId || !selectedOutfit) return;
+        try {
+            const outfitIdStr = (selectedOutfit.id || selectedOutfit._id).toString();
+            if (isLiked) {
+                await axios.post(`${API_BASE_URL}/unlike-outfit`, { userId, outfitId: outfitIdStr });
+                setIsLiked(false);
+                // Update local profile state
+                if (profile) {
+                    setProfile({
+                        ...profile,
+                        likedOutfits: profile.likedOutfits.filter(lo => lo.outfitId !== outfitIdStr)
+                    });
+                }
+            } else {
+                await axios.post(`${API_BASE_URL}/like-outfit`, { userId, outfit: selectedOutfit });
+                setIsLiked(true);
+                // Update local profile state
+                if (profile) {
+                    setProfile({
+                        ...profile,
+                        likedOutfits: [...(profile.likedOutfits || []), { outfitId: outfitIdStr, likedAt: new Date() }]
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("Like toggle failed", e);
+        }
+    };
+
+    const fetchNewLook = async () => {
+        setLoading(true);
+        try {
+            if (userId) {
+                const response = await axios.get(`${API_BASE_URL}/user-profile/${userId}`);
+                if (response.data) {
+                    setProfile(response.data);
+                    // Use user-profile instead of dashboard for full data access
+                    const dashRes = await axios.get(`${API_BASE_URL}/api/dashboard/${userId}`);
+                    if (dashRes.data.success) {
+                        setOotd(dashRes.data.outfitOfTheDay);
+                        setRecommendations(dashRes.data.recommendedOutfits);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Error fetching new look:', e);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
         const fetchData = async () => {
@@ -36,36 +104,17 @@ export default function DashboardScreen({ navigation, route }) {
                     const response = await axios.get(`${API_BASE_URL}/api/dashboard/${userId}`);
                     if (response.data.success) {
                         backendName = response.data.userName || 'User';
-                        backendProfile = { ...response.data.userAnalysis, ...response.data.styleInsights };
+                        backendProfile = { ...response.data.userAnalysis, ...response.data.styleInsights, likedOutfits: response.data.likedOutfits || [] };
                         backendOotd = response.data.outfitOfTheDay;
                         backendRecs = response.data.recommendedOutfits;
-
-                        // Track local styling history using AsyncStorage
-                        try {
-                            const historyKey = `@styling_history_${userId}`;
-                            const existingHistoryStr = await AsyncStorage.getItem(historyKey);
-                            let history = existingHistoryStr ? JSON.parse(existingHistoryStr) : [];
-                            
-                            const newEntry = {
-                               id: Date.now().toString(),
-                               date: new Date().toISOString(),
-                               season: response.data.styleInsights?.season || 'Unknown',
-                               undertone: response.data.styleInsights?.undertone || 'Unknown',
-                               ootdUrl: response.data.outfitOfTheDay?.imageUrl || null
-                            };
-
-                            // Avoid duplicating the exact same insights back-to-back on same day
-                            if (history.length === 0 || history[0].season !== newEntry.season || newEntry.date.slice(0, 10) !== history[0].date.slice(0, 10)) {
-                                 history = [newEntry, ...history].slice(0, 10); // Keep last 10
-                                 await AsyncStorage.setItem(historyKey, JSON.stringify(history));
-                            }
-                            setStylingHistory(history);
-                        } catch (e) {
-                            console.error('Error saving local history:', e);
-                        }
+                        setStylingHistory(response.data.stylingHistory || []);
                     }
                 } catch (error) {
-                    console.error('Error fetching dashboard data:', error);
+                    if (error.response && error.response.status === 403) {
+                        navigation.replace('Onboarding', { userId });
+                    } else {
+                        console.error('Error fetching dashboard data:', error);
+                    }
                 }
             }
 
@@ -80,8 +129,8 @@ export default function DashboardScreen({ navigation, route }) {
                         undertone: saved.undertone || backendProfile?.undertone || 'Unknown',
                         faceShape: saved.faceShape || backendProfile?.faceShape,
                         bodyShape: saved.bodyShape || backendProfile?.bodyShape,
-                        bestColors: saved.bestNeutrals ? saved.bestNeutrals.map(c => typeof c === 'string' ? c : c.hex) : backendProfile?.bestColors,
-                        avoidColors: saved.avoidColors ? saved.avoidColors.map(c => typeof c === 'string' ? c : c.hex) : backendProfile?.avoidColors,
+                        bestColors: saved.bestNeutrals ? saved.bestNeutrals.map(c => typeof c === 'string' ? c : (c.hex || c.value || c.color)) : backendProfile?.bestColors,
+                        avoidColors: saved.avoidColors ? saved.avoidColors.map(c => typeof c === 'string' ? c : (c.hex || c.value || c.color)) : backendProfile?.avoidColors,
                         jewelry: saved.jewelry || backendProfile?.jewelry,
                     };
 
@@ -144,31 +193,73 @@ export default function DashboardScreen({ navigation, route }) {
 
             {/* 2. Outfit of the Day */}
             <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Outfit of the Day</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                     <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Outfit of the Day</Text>
+                     {ootd && (
+                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }} onPress={fetchNewLook}>
+                             <Ionicons name="refresh" size={16} color="#632024" />
+                             <Text style={{ color: '#632024', fontSize: 12, fontWeight: '600', marginLeft: 4 }}>Curate Another</Text>
+                        </TouchableOpacity>
+                     )}
+                </View>
                 {ootd ? (
                     <View style={styles.ootdCard}>
                         <View style={styles.ootdBadge}>
                             <Ionicons name="sparkles" size={14} color="#fff" />
                             <Text style={styles.ootdBadgeText}>AI Selected</Text>
                         </View>
-                        <Text style={styles.ootdOccasion}>Score: {ootd.score}/10</Text>
-                        <Text style={styles.ootdDesc}>{ootd.type || 'Recommended Outfit'}</Text>
-                        <Text style={{ marginBottom: 12, color: '#6F4D38' }}>{ootd.matchReasons}</Text>
+                        {ootd.top && ootd.bottom ? (
+                            <>
+                                <Text style={styles.ootdDesc}>Curated Pair</Text>
+                                
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+                                    <View style={{ flex: 1, marginRight: 8 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#25344F', marginBottom: 6 }}>Top</Text>
+                                        <TouchableOpacity onPress={() => handleOpenModal(ootd.top)}>
+                                            <Image 
+                                                source={{ uri: ootd.top.imageUrl.startsWith('http') ? ootd.top.imageUrl : `${API_BASE_URL}${ootd.top.imageUrl}` }} 
+                                                style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }} 
+                                                resizeMode="cover"
+                                            />
+                                        </TouchableOpacity>
+                                        <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.top.type}</Text>
+                                    </View>
+                                    <View style={{ flex: 1, marginLeft: 8 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#25344F', marginBottom: 6 }}>Bottom</Text>
+                                        <TouchableOpacity onPress={() => handleOpenModal(ootd.bottom)}>
+                                            <Image 
+                                                source={{ uri: ootd.bottom.imageUrl.startsWith('http') ? ootd.bottom.imageUrl : `${API_BASE_URL}${ootd.bottom.imageUrl}` }} 
+                                                style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }} 
+                                                resizeMode="cover"
+                                            />
+                                        </TouchableOpacity>
+                                        <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.bottom.type}</Text>
+                                    </View>
+                                </View>
+                                
+                                <Text style={{ marginBottom: 16, color: '#6F4D38', lineHeight: 20 }}>
+                                    Perfectly matched top and bottom. {ootd.top.matchReasons}
+                                </Text>
+                            </>
+                        ) : (
+                            // Fallback for single legacy format or unstructured recommendations
+                            <>
+                                <Text style={styles.ootdOccasion}>Score: {ootd.score}/10</Text>
+                                <Text style={styles.ootdDesc}>{ootd.type || 'Recommended Outfit'}</Text>
+                                <Text style={{ marginBottom: 12, color: '#6F4D38' }}>{ootd.matchReasons}</Text>
 
-                        {ootd.imageUrl ? (
-                           <Image 
-                               source={{ uri: ootd.imageUrl.startsWith('http') ? ootd.imageUrl : `${API_BASE_URL}${ootd.imageUrl}` }} 
-                               style={{ width: '100%', height: 200, borderRadius: 12, marginBottom: 12 }} 
-                           />
-                        ) : null}
-
-                        {profile?.bestColors && profile.bestColors.length > 0 && (
-                            <View style={styles.paletteRow}>
-                                {profile.bestColors.slice(0, 4).map((color, idx) => (
-                                    <View key={idx} style={[styles.colorSwatch, { backgroundColor: color, borderWidth: color === '#FFFFFF' ? 1 : 0, borderColor: '#eee' }]} />
-                                ))}
-                            </View>
+                                {ootd.imageUrl ? (
+                                <TouchableOpacity onPress={() => handleOpenModal(ootd)}>
+                                    <Image 
+                                        source={{ uri: ootd.imageUrl.startsWith('http') ? ootd.imageUrl : `${API_BASE_URL}${ootd.imageUrl}` }} 
+                                        style={{ width: '100%', height: 200, borderRadius: 12, marginBottom: 12, backgroundColor: '#fff' }} 
+                                        resizeMode="cover"
+                                    />
+                                </TouchableOpacity>
+                                ) : null}
+                            </>
                         )}
+
                     </View>
                 ) : (
                     <Text style={{ color: '#6F4D38' }}>No Outfit of the Day available.</Text>
@@ -181,13 +272,20 @@ export default function DashboardScreen({ navigation, route }) {
                 {stylingHistory.length > 0 ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
                         {stylingHistory.map((item, index) => (
-                            <View key={item.id || index.toString()} style={styles.historyCard}>
+                            <TouchableOpacity 
+                                key={item._id || item.id || index.toString()} 
+                                style={styles.historyCard}
+                                onPress={() => navigation.navigate('Results', { analysisResults: item.analysisData, userPreferences: {} })}
+                                activeOpacity={0.8}
+                            >
                                 <Text style={styles.historyDate}>{new Date(item.date).toLocaleDateString()}</Text>
                                 <Text style={styles.historySeason}>{item.season} • {item.undertone}</Text>
                                 {item.ootdUrl ? (
-                                   <Image source={{ uri: item.ootdUrl.startsWith('http') ? item.ootdUrl : `${API_BASE_URL}${item.ootdUrl}` }} style={{ width: '100%', height: 100, borderRadius: 8, marginTop: 8 }} />
+                                   <TouchableOpacity onPress={() => handleOpenModal({ imageUrl: item.ootdUrl, type: 'Style History', matchReasons: `${item.season} ${item.undertone} analysis` })}>
+                                      <Image source={{ uri: item.ootdUrl.startsWith('http') ? item.ootdUrl : `${API_BASE_URL}${item.ootdUrl}` }} style={{ width: '100%', height: 100, borderRadius: 8, marginTop: 8 }} />
+                                   </TouchableOpacity>
                                 ) : null}
-                            </View>
+                            </TouchableOpacity>
                         ))}
                     </ScrollView>
                 ) : (
@@ -202,7 +300,9 @@ export default function DashboardScreen({ navigation, route }) {
                     {recommendations.length > 0 ? recommendations.map((rec, idx) => (
                         <View key={rec._id || rec.id || idx.toString()} style={styles.recCard}>
                             {rec.imageUrl ? (
-                                <Image source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }} style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 12 }} />
+                                <TouchableOpacity onPress={() => handleOpenModal(rec)}>
+                                    <Image source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }} style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 12 }} />
+                                </TouchableOpacity>
                             ) : null}
                             <Text style={styles.recTitle}>{rec.type || 'Outfit'}</Text>
                             <Text style={styles.recOccasion}>Score: {rec.score}/10</Text>
@@ -260,15 +360,26 @@ export default function DashboardScreen({ navigation, route }) {
                 <View style={styles.insightsColorsList}>
                     <Text style={styles.insightLabel}>Best Colors:</Text>
                     <View style={styles.paletteRow}>
-                        {profile?.bestColors?.slice(0, 8).map((c, i) => (
-                            <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: c, borderWidth: c === '#FFFFFF' ? 1 : 0, borderColor: '#eee' }]} />
-                        ))}
+                        {profile?.bestColors?.slice(0, 8).map((c, i) => {
+                            const hexColor = typeof c === 'string' ? c : (c?.hex || c?.value || c?.color || '#000000');
+                            const isWhite = hexColor.toUpperCase() === '#FFFFFF' || hexColor.toUpperCase() === '#FFF';
+                            return (
+                                <View key={i} style={[styles.colorSwatchSmall, { 
+                                    backgroundColor: hexColor, 
+                                    borderWidth: isWhite ? 1 : 0, 
+                                    borderColor: '#eee' 
+                                }]} />
+                            );
+                        })}
                     </View>
                     <Text style={[styles.insightLabel, { marginTop: 16 }]}>Colors to Avoid:</Text>
                     <View style={styles.paletteRow}>
-                        {profile?.avoidColors?.slice(0, 8).map((c, i) => (
-                            <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: c }]} />
-                        ))}
+                        {profile?.avoidColors?.slice(0, 8).map((c, i) => {
+                            const hexColor = typeof c === 'string' ? c : (c?.hex || c?.value || c?.color || '#000000');
+                            return (
+                                <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: hexColor }]} />
+                            );
+                        })}
                     </View>
                 </View>
             </View>
@@ -282,10 +393,17 @@ export default function DashboardScreen({ navigation, route }) {
                 </TouchableOpacity>
             </View>
 
+            <OutfitDetailsModal 
+                visible={modalVisible}
+                onClose={() => setModalVisible(false)}
+                outfit={selectedOutfit}
+                isLiked={isLiked}
+                onToggleLike={handleToggleLike}
+            />
+
         </ScrollView>
     );
 }
-
 const styles = StyleSheet.create({
     container: {
         flex: 1,

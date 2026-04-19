@@ -127,8 +127,21 @@ const ResultsScreen = ({ navigation, route }) => {
     navigation.navigate('Onboarding');
   };
 
-  const handleGoToDashboard = () => {
-    navigation.replace('Main', { screen: 'DashboardRoot' });
+  const handleGoToDashboard = async () => {
+    try {
+      const storedUserId = await AsyncStorage.getItem('userId');
+      if (storedUserId) {
+        navigation.replace('Main', { 
+          screen: 'DashboardRoot',
+          params: { userId: storedUserId }
+        });
+      } else {
+        navigation.replace('Auth');
+      }
+    } catch (e) {
+      console.error('Error reading userId:', e);
+      navigation.replace('Auth');
+    }
   };
 
   return (

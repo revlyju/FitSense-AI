@@ -1,25 +1,76 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import * as ImagePicker from 'expo-image-picker';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { API_BASE_URL } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
+
+const { width } = Dimensions.get('window');
 
 export default function GenerateOutfitScreen({ navigation }) {
     const { theme, isDark } = useTheme();
     const [imageUri, setImageUri] = useState(null);
+    const [imageBase64, setImageBase64] = useState(null);
     const [isGenerating, setIsGenerating] = useState(false);
-    const [showResults, setShowResults] = useState(false);
+    const [analysis, setAnalysis] = useState(null);
 
-    const handleGenerate = () => {
+    const pickImage = async () => {
+        try {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission required', 'Please allow access to your photos to upload a garment.');
+                return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                quality: 0.6,
+                base64: true,
+            });
+
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                setImageUri(result.assets[0].uri);
+                setImageBase64(result.assets[0].base64);
+                setAnalysis(null); // Clear previous results
+            }
+        } catch (error) {
+            console.error('Image picker error:', error);
+            Alert.alert('Error', 'Failed to pick image.');
+        }
+    };
+
+    const handleGenerate = async () => {
+        if (!imageBase64) {
+            Alert.alert("Missing Image", "Please upload a photo of a garment first.");
+            return;
+        }
+
         setIsGenerating(true);
-        setTimeout(() => {
+
+        try {
+            const response = await axios.post(`${API_BASE_URL}/api/analyze-garment`, {
+                image: imageBase64
+            });
+
+            if (response.data.success && response.data.analysis) {
+                setAnalysis(response.data.analysis);
+            } else {
+                throw new Error("Invalid response from server");
+            }
+        } catch (err) {
+            console.error("Garment analysis failed:", err);
+            Alert.alert("Analysis Failed", "Our AI could not analyze this item. Please try a clearer photo.");
+        } finally {
             setIsGenerating(false);
-            setShowResults(true);
-        }, 1500);
+        }
     };
 
     const handleReset = () => {
         setImageUri(null);
-        setShowResults(false);
+        setImageBase64(null);
+        setAnalysis(null);
     };
 
     return (
@@ -28,111 +79,131 @@ export default function GenerateOutfitScreen({ navigation }) {
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
                     <Ionicons name="menu-outline" size={28} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>Generate Outfit</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>Style Anything</Text>
             </View>
-            
-            <ScrollView contentContainerStyle={styles.scrollContent}>
-                {!showResults ? (
+
+            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+                {!analysis ? (
                     <>
                         <View style={styles.introSection}>
-                            <Text style={styles.title}>Style an Accessory</Text>
-                            <Text style={styles.subtitle}>
-                                Upload a picture of any accessory (e.g., shoes, bag, necklace) and our AI will recommend the perfect colors and clothing pieces to match it!
+                            <Text style={[styles.title, { color: theme.text }]}>AI Style Lab</Text>
+                            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+                                Upload a photo of any clothing item or accessory. Our Gemini-powered AI will analyze its texture, color, and silhouette to curate the perfect look for you.
                             </Text>
                         </View>
 
-                        <TouchableOpacity 
-                            style={styles.uploadContainer} 
+                        <TouchableOpacity
+                            style={[styles.uploadContainer, { backgroundColor: theme.card, borderColor: theme.border }]}
                             activeOpacity={0.8}
-                            onPress={() => setImageUri('https://via.placeholder.com/300x300.png?text=Sample+Uploaded+Accessory')}
+                            onPress={pickImage}
                         >
                             {imageUri ? (
-                                <Image source={{ uri: imageUri }} style={styles.uploadedImage} />
+                                <Image source={{ uri: imageUri }} style={styles.uploadedImage} resizeMode="contain" />
                             ) : (
                                 <>
-                                    <View style={styles.uploadIconContainer}>
-                                        <Ionicons name="camera-outline" size={40} color="#632024" />
+                                    <View style={[styles.uploadIconContainer, { backgroundColor: isDark ? '#2E2E48' : '#F5EBE6' }]}>
+                                        <Ionicons name="camera-outline" size={40} color={theme.accent} />
                                     </View>
-                                    <Text style={styles.uploadText}>Tap to Upload Accessory</Text>
-                                    <Text style={styles.uploadSubtext}>Supports JPG, PNG</Text>
+                                    <Text style={[styles.uploadText, { color: theme.text }]}>Upload Garment Photo</Text>
+                                    <Text style={[styles.uploadSubtext, { color: theme.textSecondary }]}>Supports JPG, PNG (Max 10MB)</Text>
                                 </>
                             )}
                         </TouchableOpacity>
 
-                        <View style={styles.infoBox}>
-                            <Ionicons name="information-circle-outline" size={24} color="#6F4D38" style={styles.infoIcon} />
+                        <View style={[styles.infoBox, { backgroundColor: isDark ? '#2E2E48' : '#F5EBE6' }]}>
+                            <Ionicons name="sparkles" size={24} color={theme.accent} style={styles.infoIcon} />
                             <View style={styles.infoTextContainer}>
-                                <Text style={styles.infoTextTitle}>What you will get:</Text>
-                                <Text style={styles.infoText}>• Recommended color palettes</Text>
-                                <Text style={styles.infoText}>• Complementary clothing pieces</Text>
-                                <Text style={styles.infoText}>• Styling tips and matching accessories</Text>
+                                <Text style={[styles.infoTextTitle, { color: theme.text }]}>Insight Engine:</Text>
+                                <Text style={[styles.infoText, { color: theme.textSecondary }]}>• Expert Color Palettes</Text>
+                                <Text style={[styles.infoText, { color: theme.textSecondary }]}>• Complementary Pieces</Text>
+                                <Text style={[styles.infoText, { color: theme.textSecondary }]}>• Professional Styling Tips</Text>
                             </View>
                         </View>
 
-                        <TouchableOpacity 
-                            style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]} 
+                        <TouchableOpacity
+                            style={[styles.generateButton, { backgroundColor: theme.accent }, (isGenerating || !imageUri) && styles.generateButtonDisabled]}
                             activeOpacity={0.8}
                             onPress={handleGenerate}
-                            disabled={isGenerating}
+                            disabled={isGenerating || !imageUri}
                         >
                             {isGenerating ? (
-                                <ActivityIndicator color="#fff" size="small" />
+                                <View style={styles.loadingRow}>
+                                    <ActivityIndicator color="#fff" size="small" />
+                                    <Text style={styles.generateButtonText}>Analyzing your style...</Text>
+                                </View>
                             ) : (
                                 <>
-                                    <Ionicons name="color-wand-outline" size={20} color="#fff" style={styles.generateIcon} />
-                                    <Text style={styles.generateButtonText}>Generate Outfit Recommendations</Text>
+                                    <Ionicons name="analytics-outline" size={20} color="#fff" style={styles.generateIcon} />
+                                    <Text style={styles.generateButtonText}>Analyze & Style Item</Text>
                                 </>
                             )}
                         </TouchableOpacity>
                     </>
                 ) : (
                     <View style={styles.resultsContainer}>
-                        <View style={styles.resultHeader}>
-                            <Ionicons name="sparkles" size={28} color="#632024" />
-                            <Text style={styles.resultTitle}>Your AI Recommendations</Text>
-                        </View>
-                        
-                        {imageUri && (
-                            <View style={styles.resultImageWrapper}>
-                                <Image source={{ uri: imageUri }} style={styles.resultImageSmall} />
-                                <Text style={styles.resultImageLabel}>Your Item</Text>
-                            </View>
-                        )}
-
-                        <View style={styles.resultSection}>
-                            <Text style={styles.sectionTitle}>Complementary Colors</Text>
-                            <View style={styles.colorsContainer}>
-                                <View style={[styles.colorSwatch, { backgroundColor: '#FADADD' }]} />
-                                <View style={[styles.colorSwatch, { backgroundColor: '#003366' }]} />
-                                <View style={[styles.colorSwatch, { backgroundColor: '#EADDCA' }]} />
-                                <View style={[styles.colorSwatch, { backgroundColor: '#FFFFFF', borderColor: '#ccc', borderWidth: 1 }]} />
-                                <View style={[styles.colorSwatch, { backgroundColor: '#4F7942' }]} />
-                            </View>
-                            <Text style={styles.resultText}>Soft pinks, navy blue, beige, crisp white, and earth green pair beautifully with this item.</Text>
+                        <View style={[styles.resultHeader, { backgroundColor: isDark ? '#2E2E48' : '#F5EBE6' }]}>
+                            <Ionicons name="ribbon-outline" size={28} color={theme.accent} />
+                            <Text style={[styles.resultTitle, { color: theme.text }]}>AI Style Profile</Text>
                         </View>
 
-                        <View style={styles.resultSection}>
-                            <Text style={styles.sectionTitle}>Matching Clothing Pieces</Text>
+                        <View style={styles.resultImageWrapper}>
+                            <Image source={{ uri: imageUri }} style={[styles.resultImageSmall, { borderColor: theme.border, backgroundColor: '#fff' }]} resizeMode="contain" />
+                            <Text style={[styles.resultImageLabel, { color: theme.text }]}>Target Item</Text>
+                        </View>
+
+                        <View style={[styles.resultSection, { backgroundColor: theme.card }]}>
+                            <Text style={[styles.sectionTitle, { color: theme.text }]}>Item Description</Text>
+                            <Text style={[styles.resultText, { color: theme.textSecondary }]}>{analysis.description}</Text>
+                        </View>
+
+                        <View style={[styles.resultSection, { backgroundColor: theme.card }]}>
+                            <Text style={[styles.sectionTitle, { color: theme.text }]}>Pro Color Palettes</Text>
+                            {analysis.colorPalettes.map((p, idx) => (
+                                <View key={idx} style={styles.paletteRow}>
+                                    <Text style={[styles.paletteName, { color: theme.text }]}>{p.name}</Text>
+                                    <View style={styles.colorsContainer}>
+                                        {p.colors.map((hex, i) => (
+                                            <View key={i} style={[styles.colorSwatch, { backgroundColor: hex }]} />
+                                        ))}
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+
+                        <View style={[styles.resultSection, { backgroundColor: theme.card }]}>
+                            <Text style={[styles.sectionTitle, { color: theme.text }]}>Complementary Pieces</Text>
                             <View style={styles.bulletList}>
-                                <Text style={styles.bulletItem}>• High-waisted wide-leg trousers (Navy or Beige)</Text>
-                                <Text style={styles.bulletItem}>• Crisp white silk or linen button-up shirt</Text>
-                                <Text style={styles.bulletItem}>• A tailored blazer to elevate the structured look</Text>
-                                <Text style={styles.bulletItem}>• Flowy midi skirts for a softer, relaxed aesthetic</Text>
+                                {analysis.complementaryItems.map((item, idx) => (
+                                    <Text key={idx} style={[styles.bulletItem, { color: theme.textSecondary }]}>• {item}</Text>
+                                ))}
                             </View>
                         </View>
 
-                        <View style={styles.resultSection}>
-                            <Text style={styles.sectionTitle}>Other Accessories</Text>
+                        <View style={[styles.resultSection, { backgroundColor: theme.card }]}>
+                            <Text style={[styles.sectionTitle, { color: theme.text }]}>Styling & Context</Text>
                             <View style={styles.bulletList}>
-                                <Text style={styles.bulletItem}>• Minimalist gold jewelry (hoops, thin chain)</Text>
-                                <Text style={styles.bulletItem}>• Neutral-toned structured crossbody handbag</Text>
-                                <Text style={styles.bulletItem}>• Classic tortoiseshell sunglasses</Text>
+                                {analysis.stylingTips.map((tip, idx) => (
+                                    <Text key={idx} style={[styles.bulletItem, { color: theme.textSecondary }]}>• {tip}</Text>
+                                ))}
                             </View>
                         </View>
 
-                        <TouchableOpacity style={styles.resetButton} activeOpacity={0.8} onPress={handleReset}>
-                            <Ionicons name="refresh-outline" size={20} color="#632024" style={styles.generateIcon} />
-                            <Text style={styles.resetButtonText}>Start Over</Text>
+                        <View style={[styles.resultSection, { backgroundColor: theme.card }]}>
+                            <Text style={[styles.sectionTitle, { color: theme.text }]}>Matching Accessories</Text>
+                            <View style={styles.bulletList}>
+                                {analysis.matchingAccessories.map((acc, idx) => (
+                                    <Text key={idx} style={[styles.bulletItem, { color: theme.textSecondary }]}>• {acc}</Text>
+                                ))}
+                            </View>
+                        </View>
+
+                        <TouchableOpacity
+                            style={[styles.resetButton, { borderColor: theme.accent }]}
+                            activeOpacity={0.8}
+                            onPress={handleReset}
+                        >
+                            <Ionicons name="refresh-outline" size={20} color={theme.accent} style={styles.generateIcon} />
+                            <Text style={[styles.resetButtonText, { color: theme.accent }]}>Style Another Item</Text>
                         </TouchableOpacity>
                     </View>
                 )}
@@ -142,22 +213,17 @@ export default function GenerateOutfitScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-    container: { 
-        flex: 1, 
-        backgroundColor: '#FAF9F6' 
-    },
+    container: { flex: 1 },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 20,
         paddingTop: 60,
         paddingBottom: 20,
-        backgroundColor: '#fff',
         borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0'
     },
     menuButton: { marginRight: 15 },
-    headerTitle: { fontSize: 20, fontWeight: '700', color: '#25344F' },
+    headerTitle: { fontSize: 20, fontWeight: '700' },
     scrollContent: {
         padding: 20,
         paddingBottom: 40,
@@ -168,18 +234,14 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 24,
         fontWeight: 'bold',
-        color: '#25344F',
         marginBottom: 8,
     },
     subtitle: {
         fontSize: 15,
-        color: '#6F4D38',
         lineHeight: 22,
     },
     uploadContainer: {
-        backgroundColor: '#fff',
         borderWidth: 2,
-        borderColor: '#E8E0D9',
         borderStyle: 'dashed',
         borderRadius: 16,
         padding: 40,
@@ -196,7 +258,6 @@ const styles = StyleSheet.create({
         width: 70,
         height: 70,
         borderRadius: 35,
-        backgroundColor: '#F5EBE6',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 15,
@@ -204,22 +265,18 @@ const styles = StyleSheet.create({
     uploadText: {
         fontSize: 18,
         fontWeight: '600',
-        color: '#25344F',
         marginBottom: 5,
     },
     uploadSubtext: {
         fontSize: 14,
-        color: '#999',
     },
     uploadedImage: {
         width: '100%',
-        height: 200,
+        height: 300,
         borderRadius: 12,
-        resizeMode: 'contain',
     },
     infoBox: {
         flexDirection: 'row',
-        backgroundColor: '#F5EBE6',
         padding: 18,
         borderRadius: 12,
         marginBottom: 30,
@@ -234,29 +291,30 @@ const styles = StyleSheet.create({
     infoTextTitle: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#25344F',
         marginBottom: 8,
     },
     infoText: {
         fontSize: 14,
-        color: '#6F4D38',
         lineHeight: 22,
     },
     generateButton: {
         flexDirection: 'row',
-        backgroundColor: '#632024',
         padding: 18,
         borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        shadowColor: '#632024',
+        shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
+        shadowOpacity: 0.2,
         shadowRadius: 6,
         elevation: 4,
     },
     generateButtonDisabled: {
-        opacity: 0.7,
+        opacity: 0.5,
+    },
+    loadingRow: {
+        flexDirection: 'row',
+        alignItems: 'center'
     },
     generateIcon: {
         marginRight: 10,
@@ -265,6 +323,7 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         fontWeight: '700',
+        marginLeft: 8
     },
     // Results Styles
     resultsContainer: {
@@ -274,16 +333,14 @@ const styles = StyleSheet.create({
     resultHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 20,
+        marginBottom: 25,
         justifyContent: 'center',
-        backgroundColor: '#F5EBE6',
         padding: 15,
         borderRadius: 12,
     },
     resultTitle: {
         fontSize: 22,
         fontWeight: 'bold',
-        color: '#25344F',
         marginLeft: 10,
     },
     resultImageWrapper: {
@@ -291,21 +348,19 @@ const styles = StyleSheet.create({
         marginBottom: 25,
     },
     resultImageSmall: {
-        width: 150,
-        height: 150,
-        borderRadius: 12,
-        resizeMode: 'cover',
+        width: 200,
+        height: 250,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#E8E0D9',
         marginBottom: 8,
     },
     resultImageLabel: {
         fontSize: 14,
-        color: '#6F4D38',
-        fontWeight: '500',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        opacity: 0.7
     },
     resultSection: {
-        backgroundColor: '#fff',
         padding: 20,
         borderRadius: 16,
         marginBottom: 20,
@@ -317,30 +372,32 @@ const styles = StyleSheet.create({
     },
     sectionTitle: {
         fontSize: 18,
-        fontWeight: '600',
-        color: '#25344F',
+        fontWeight: '700',
         marginBottom: 15,
+    },
+    paletteRow: {
+        marginBottom: 15
+    },
+    paletteName: {
+        fontSize: 14,
+        fontWeight: '600',
+        marginBottom: 8
     },
     colorsContainer: {
         flexDirection: 'row',
-        marginBottom: 15,
         flexWrap: 'wrap',
     },
     colorSwatch: {
-        width: 45,
-        height: 45,
-        borderRadius: 22.5,
-        marginRight: 12,
-        marginBottom: 10,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.2,
-        shadowRadius: 2,
-        elevation: 2,
+        width: 40,
+        height: 40,
+        borderRadius: 8,
+        marginRight: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.05)'
     },
     resultText: {
         fontSize: 15,
-        color: '#6F4D38',
         lineHeight: 22,
     },
     bulletList: {
@@ -348,23 +405,19 @@ const styles = StyleSheet.create({
     },
     bulletItem: {
         fontSize: 15,
-        color: '#6F4D38',
         lineHeight: 24,
-        marginBottom: 8,
+        marginBottom: 10,
     },
     resetButton: {
         flexDirection: 'row',
-        backgroundColor: '#fff',
         padding: 18,
         borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#632024',
+        borderWidth: 2,
         marginTop: 10,
     },
     resetButtonText: {
-        color: '#632024',
         fontSize: 16,
         fontWeight: '700',
     }

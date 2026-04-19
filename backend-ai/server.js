@@ -72,9 +72,9 @@ const userSchema = new mongoose.Schema({
     ootdUrl: String,
     analysisData: mongoose.Schema.Types.Mixed
   }],
-  likedOutfits: [{ 
-    outfitId: String, 
-    likedAt: { type: Date, default: Date.now } 
+  likedOutfits: [{
+    outfitId: String,
+    likedAt: { type: Date, default: Date.now }
   }],
   styleMemory: {
     likedColors: [String],
@@ -139,11 +139,11 @@ const analysisHistorySchema = new mongoose.Schema({
   bestColors: [mongoose.Schema.Types.Mixed],
   avoidColors: [mongoose.Schema.Types.Mixed],
   recommendedOutfits: [{
-      outfitId: String,
-      type: String,
-      imageUrl: String,
-      link: String,
-      score: Number
+    outfitId: String,
+    type: String,
+    imageUrl: String,
+    link: String,
+    score: Number
   }]
 });
 const AnalysisHistory = mongoose.model("AnalysisHistory", analysisHistorySchema);
@@ -256,7 +256,7 @@ app.post("/like-outfit", async (req, res) => {
     if (!userId || !outfit || !outfit.id) {
       return res.status(400).json({ error: "userId and outfit are required" });
     }
-    
+
     let user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
@@ -326,22 +326,22 @@ app.get("/user-profile/:userId", async (req, res) => {
   try {
     const user = await User.findById(req.params.userId).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
-    
+
     // Convert generic IDs into full DB outfits
     const Outfit = mongoose.connection.useDb('outfits').model("Outfit", new mongoose.Schema({}, { strict: false }), "outfits");
-    
+
     const likedIds = (user.likedOutfits || []).map(lo => lo.outfitId);
     let populatedOutfits = [];
     if (likedIds.length > 0) {
-       // Search via both standard _id mapping or custom id strings
-       populatedOutfits = await Outfit.find({ 
-           $or: [ { id: { $in: likedIds } }, { _id: { $in: likedIds } } ] 
-       }).lean();
+      // Search via both standard _id mapping or custom id strings
+      populatedOutfits = await Outfit.find({
+        $or: [{ id: { $in: likedIds } }, { _id: { $in: likedIds } }]
+      }).lean();
     }
 
     // Remap their IDs reliably for Frontend and sort by newest likes
     populatedOutfits = populatedOutfits.map(o => ({ ...o, id: o.id || o._id.toString() }));
-    
+
     return res.json({ ...user, populatedLikedOutfits: populatedOutfits });
   } catch (error) {
     console.error("Get Profile Error:", error);
@@ -499,9 +499,9 @@ async function callGemini(url, payload) {
 
 // outfit scorer and recommender
 function getSmartRecommendations(dbOutfits, userProfile) {
-  const { 
-    gender, bodyShape, occasion, seasonOrWeather, 
-    stylePreference, colorPreference, fitPreference 
+  const {
+    gender, bodyShape, occasion, seasonOrWeather,
+    stylePreference, colorPreference, fitPreference
   } = userProfile;
 
   const normalize = (val) => {
@@ -515,7 +515,7 @@ function getSmartRecommendations(dbOutfits, userProfile) {
     userGenderRaw.some((g) => ["men", "man", "male", "m"].includes(g)) ? "men" :
       userGenderRaw.some((g) => ["women", "woman", "female", "f"].includes(g)) ? "women" :
         "";
-  
+
   const userOccasions = normalize(occasion);
   const userStyles = normalize(stylePreference);
   const userSeasons = normalize(seasonOrWeather);
@@ -542,7 +542,7 @@ function getSmartRecommendations(dbOutfits, userProfile) {
     if (userOccasions.length > 0 && dbOccasions.length > 0) {
       return intersects(userOccasions, dbOccasions);
     }
-    return true; 
+    return true;
   });
 
   if (strictFiltered.length < 8) {
@@ -637,8 +637,8 @@ function getSmartRecommendations(dbOutfits, userProfile) {
   scoredOutfits = scoredOutfits.filter(o => o.score > -20);
 
   if (scoredOutfits.length === 0) {
-     console.log("[Recommendation] Extreme fallback hit. No outfits passed threshold.");
-     scoredOutfits = filtered.map(o => ({ ...o, score: 0, id: o._id, type: o.type||"Outfit", imageUrl: o.imageUrl || `/outfit_img/${o._id}.jpg` }));
+    console.log("[Recommendation] Extreme fallback hit. No outfits passed threshold.");
+    scoredOutfits = filtered.map(o => ({ ...o, score: 0, id: o._id, type: o.type || "Outfit", imageUrl: o.imageUrl || `/outfit_img/${o._id}.jpg` }));
   }
 
   // Phase 4: SORTING
@@ -649,14 +649,14 @@ function getSmartRecommendations(dbOutfits, userProfile) {
   scoredOutfits.forEach(o => {
     let normalized = Math.round((Math.max(0, o.score) / 120) * 10);
     // Even an okay match should score decently to prevent demoralizing UI
-    o.score = Math.min(10, Math.max(6, normalized)); 
+    o.score = Math.min(10, Math.max(6, normalized));
   });
 
   // Phase 5: DIVERSITY & SHUFFLING
   let topCandidates = scoredOutfits.slice(0, 15);
   for (let i = topCandidates.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [topCandidates[i], topCandidates[j]] = [topCandidates[j], topCandidates[i]];
+    const j = Math.floor(Math.random() * (i + 1));
+    [topCandidates[i], topCandidates[j]] = [topCandidates[j], topCandidates[i]];
   }
 
   return topCandidates.slice(0, 10);
@@ -773,7 +773,7 @@ function isColorCompatible(colors1, colors2) {
 
   for (const [a, b] of goodPairs) {
     if ((c1.some(c => c.includes(a)) && c2.some(c => c.includes(b))) ||
-        (c1.some(c => c.includes(b)) && c2.some(c => c.includes(a)))) {
+      (c1.some(c => c.includes(b)) && c2.some(c => c.includes(a)))) {
       return true;
     }
   }
@@ -1215,37 +1215,37 @@ app.post("/analyze-style", async (req, res) => {
     // CACHING BLOCK: Avoid hitting pipeline if no new image is provided
     let dbUser = null;
     if (userId) {
-       dbUser = await User.findById(userId).lean();
-       if (dbUser && dbUser.profileAnalyzed && dbUser.analysis && !image) {
-           console.log(`[Cache Hit] Returning cached analysis for user ${userId}. Bypassing Gemini/Python pipeline.`);
-           let analysis = dbUser.analysis;
-           
-           try {
-             const dbOutfits = await Outfit.find({}).lean();
-             const rawUserGender = (req.body?.userGender || gender || dbUser.gender || "").toString().toLowerCase().trim();
-             const userGender = ["men", "man", "male", "m"].includes(rawUserGender) ? "men" : ["women", "woman", "female", "f"].includes(rawUserGender) ? "women" : "";
+      dbUser = await User.findById(userId).lean();
+      if (dbUser && dbUser.profileAnalyzed && dbUser.analysis && !image) {
+        console.log(`[Cache Hit] Returning cached analysis for user ${userId}. Bypassing Gemini/Python pipeline.`);
+        let analysis = dbUser.analysis;
 
-             const userProfile = {
-               gender: userGender,
-               bodyShape: analysis.bodyShape,
-               colorSeason: analysis.colorSeason,
-               necklines: analysis.necklines,
-               occasion,
-               seasonOrWeather,
-               stylePreference,
-               colorPreference,
-               fitPreference
-             };
+        try {
+          const dbOutfits = await Outfit.find({}).lean();
+          const rawUserGender = (req.body?.userGender || gender || dbUser.gender || "").toString().toLowerCase().trim();
+          const userGender = ["men", "man", "male", "m"].includes(rawUserGender) ? "men" : ["women", "woman", "female", "f"].includes(rawUserGender) ? "women" : "";
 
-             const recommended = getSmartRecommendations(dbOutfits, userProfile);
-             analysis.dbOutfits = recommended.slice(0, 5);
-           } catch (e) {
-             analysis.dbOutfits = [];
-           }
-           
-           // Natively return without running APIs
-           return res.json(analysis);
-       }
+          const userProfile = {
+            gender: userGender,
+            bodyShape: analysis.bodyShape,
+            colorSeason: analysis.colorSeason,
+            necklines: analysis.necklines,
+            occasion,
+            seasonOrWeather,
+            stylePreference,
+            colorPreference,
+            fitPreference
+          };
+
+          const recommended = getSmartRecommendations(dbOutfits, userProfile);
+          analysis.dbOutfits = recommended.slice(0, 5);
+        } catch (e) {
+          analysis.dbOutfits = [];
+        }
+
+        // Natively return without running APIs
+        return res.json(analysis);
+      }
     }
 
     const parsedImage = parseImageBase64(image);
@@ -1287,7 +1287,7 @@ app.post("/analyze-style", async (req, res) => {
         } else {
           console.log("Python did not detect a face to censor. Passing original image directly.");
         }
-        
+
         const censorPath = path.join(__dirname, 'censored_latest.jpg');
         fs.writeFileSync(censorPath, Buffer.from(finalImageData, 'base64'));
         console.log(`\n\n🟢 IMAGE SENT TO API! View it here: file:///${censorPath.replace(/\\/g, '/')}\n\n`);
@@ -1555,7 +1555,7 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
       };
 
       const recommended = getSmartRecommendations(dbOutfits, userProfile);
-      
+
       // Top 5 purely for immediate analysis display
       analysis.dbOutfits = recommended.slice(0, 5);
 
@@ -1586,7 +1586,7 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
             fitPreference: (Array.isArray(fitPreference) ? fitPreference : (fitPreference ? [fitPreference] : [])).filter(v => v && v !== "No Preference")
           }
         };
-        
+
         const newHistoryEntry = {
           date: new Date(),
           season: analysis.colorSeason || "Unknown",
@@ -1608,34 +1608,34 @@ Return ONLY a valid JSON object with the exact following structure. Do not inclu
 
         // -- Dedicated Tab Save --
         try {
-            const occasionName = (Array.isArray(occasion) ? occasion[0] : occasion) || "Style";
-            await AnalysisHistory.create({
-              userId: userId,
-              analysisName: `${occasionName.charAt(0).toUpperCase() + occasionName.slice(1)} Look`,
-              faceShape: analysis.faceShape,
-              bodyShape: analysis.bodyShape,
-              skinTone: analysis.skinTone,
-              undertone: analysis.undertone,
-              contrastLevel: analysis.contrastLevel,
-              bestColors: analysis.bestNeutrals ? [...analysis.bestNeutrals, ...(analysis.bestAccentColors || [])] : [],
-              avoidColors: analysis.avoidColors || [],
-              recommendedOutfits: (analysis.dbOutfits || []).map(o => ({
-                outfitId: o.id || o._id,
-                type: o.type || o.category || "Outfit",
-                imageUrl: o.imageUrl,
-                link: o.link,
-                score: o.score
-              }))
-            });
+          const occasionName = (Array.isArray(occasion) ? occasion[0] : occasion) || "Style";
+          await AnalysisHistory.create({
+            userId: userId,
+            analysisName: `${occasionName.charAt(0).toUpperCase() + occasionName.slice(1)} Look`,
+            faceShape: analysis.faceShape,
+            bodyShape: analysis.bodyShape,
+            skinTone: analysis.skinTone,
+            undertone: analysis.undertone,
+            contrastLevel: analysis.contrastLevel,
+            bestColors: analysis.bestNeutrals ? [...analysis.bestNeutrals, ...(analysis.bestAccentColors || [])] : [],
+            avoidColors: analysis.avoidColors || [],
+            recommendedOutfits: (analysis.dbOutfits || []).map(o => ({
+              outfitId: o.id || o._id,
+              type: o.type || o.category || "Outfit",
+              imageUrl: o.imageUrl,
+              link: o.link,
+              score: o.score
+            }))
+          });
 
-            // Keep only last 5
-            const analyses = await AnalysisHistory.find({ userId }).sort({ createdAt: -1 });
-            if (analyses.length > 5) {
-              const idsToDelete = analyses.slice(5).map(a => a._id);
-              await AnalysisHistory.deleteMany({ _id: { $in: idsToDelete } });
-            }
+          // Keep only last 5
+          const analyses = await AnalysisHistory.find({ userId }).sort({ createdAt: -1 });
+          if (analyses.length > 5) {
+            const idsToDelete = analyses.slice(5).map(a => a._id);
+            await AnalysisHistory.deleteMany({ _id: { $in: idsToDelete } });
+          }
         } catch (hErr) {
-            console.error("Error updating AnalysisHistory coll:", hErr);
+          console.error("Error updating AnalysisHistory coll:", hErr);
         }
       }
 
@@ -1692,15 +1692,15 @@ app.get("/api/dashboard/:userId", async (req, res) => {
     const dbOutfits = await Outfit.find({});
 
     const allRecommendations = getSmartRecommendations(dbOutfits, userProfile);
-    
+
     const outfitOfTheDay = generateOOTD(dbOutfits, userProfile);
     let recommendedOutfits = [...allRecommendations];
-    
+
     if (outfitOfTheDay) {
-        // filter out the top and bottom from recommendations to avoid duplicates
-        recommendedOutfits = recommendedOutfits.filter(o => 
-            o.id !== outfitOfTheDay.top?.id && o.id !== outfitOfTheDay.bottom?.id
-        );
+      // filter out the top and bottom from recommendations to avoid duplicates
+      recommendedOutfits = recommendedOutfits.filter(o =>
+        o.id !== outfitOfTheDay.top?.id && o.id !== outfitOfTheDay.bottom?.id
+      );
     }
 
     // Construct Response
@@ -1803,19 +1803,19 @@ app.post("/virtual-tryon", async (req, res) => {
           "Authorization": `Bearer ${process.env.FASHN_API_KEY}`
         }
       });
-      
+
       status = check.data?.status || status;
 
       if (status === "completed") {
-         const resultImage = check.data?.output?.[0]; 
-         if(!resultImage) {
-           return res.status(500).json({ error: "FASHN.ai completed successfully but returned no image" });
-         }
-         return res.json({ success: true, resultImage });
+        const resultImage = check.data?.output?.[0];
+        if (!resultImage) {
+          return res.status(500).json({ error: "FASHN.ai completed successfully but returned no image" });
+        }
+        return res.json({ success: true, resultImage });
       }
 
       if (status === "failed") {
-          return res.status(500).json({ error: "FASHN.ai job failed during processing" });
+        return res.status(500).json({ error: "FASHN.ai job failed during processing" });
       }
     }
 
@@ -1914,6 +1914,83 @@ app.put("/user/settings", async (req, res) => {
   }
 });
 
+// NEW: Analyze a specific garment
+app.post("/api/analyze-garment", async (req, res) => {
+  const { image, userId } = req.body;
+  if (!image) return res.status(400).json({ error: "Image is required" });
+
+  try {
+    // 1. Prepare Gemini payload (image is base64)
+    const base64Data = image.includes("base64,") ? image.split("base64,")[1] : image;
+
+    // We'll ask for a structured JSON response
+    const prompt = `Analyze this clothing item/garment image. Provide a sophisticated fashion analysis in JSON format. 
+    JSON structure:
+    {
+      "description": "Short stylish description of the item",
+      "colorPalettes": [
+        {"name": "Palette Name 1", "colors": ["#hex1", "#hex2", "#hex3"]},
+        {"name": "Palette Name 2", "colors": ["#hex4", "#hex5", "#hex6"]}
+      ],
+      "complementaryItems": ["item 1", "item 2", "item 3", "item 4"],
+      "stylingTips": ["tip 1", "tip 2", "tip 3", "tip 4"],
+      "matchingAccessories": ["accessory 1", "accessory 2", "accessory 3"]
+    }
+    Be expert, specific, and ensure color choices are harmonious.`;
+
+    const geminiPayload = {
+      contents: [{
+        parts: [
+          { text: prompt },
+          {
+            inline_data: {
+              mime_type: "image/jpeg",
+              data: base64Data
+            }
+          }
+        ]
+      }]
+    };
+
+    let geminiResponse;
+    let lastErrorData = null;
+
+    for (const modelName of GEMINI_MODELS_TO_TRY) {
+      console.log(`[AnalyzeGarment] Trying model: ${modelName}`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+      geminiResponse = await callGemini(url, geminiPayload);
+
+      if (geminiResponse.status < 400) {
+        break;
+      }
+      lastErrorData = geminiResponse.data;
+    }
+
+    if (!geminiResponse || geminiResponse.status >= 400) {
+      return res.status(500).json({ error: "Gemini analysis failed", details: lastErrorData });
+    }
+
+    const textOutput = geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+
+    // Extract JSON
+    let analysis;
+    try {
+      const jsonMatch = textOutput.match(/\{[\s\S]*\}/);
+      analysis = JSON.parse(jsonMatch ? jsonMatch[0] : textOutput);
+    } catch (e) {
+      console.error("Failed to parse Gemini JSON:", textOutput);
+      return res.status(500).json({ error: "Could not parse AI response", raw: textOutput });
+    }
+
+    res.json({ success: true, analysis });
+
+  } catch (err) {
+    console.error("Garment analysis error:", err);
+    res.status(500).json({ error: "Internal server error during analysis" });
+  }
+});
+
 const PORT = 5000;
 
 app.listen(PORT, () => {
@@ -1923,21 +2000,21 @@ app.listen(PORT, () => {
 // AI Chatbot endpoint
 app.post("/api/chat", async (req, res) => {
   const { messages, userId } = req.body;
-  
+
   try {
     let userContext = "";
     if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-       const user = await User.findById(userId);
-       if (user) {
-          userContext = `\n\nUser Context:\nGender: ${user.gender}\nSeason: ${user.analysis?.colorSeason}\nUndertone: ${user.analysis?.undertone}\nBody Shape: ${user.analysis?.bodyShape}`;
-       }
+      const user = await User.findById(userId);
+      if (user) {
+        userContext = `\n\nUser Context:\nGender: ${user.gender}\nSeason: ${user.analysis?.colorSeason}\nUndertone: ${user.analysis?.undertone}\nBody Shape: ${user.analysis?.bodyShape}`;
+      }
     }
 
     const chatCompletion = await groq.chat.completions.create({
       messages: [
-        { 
-          role: "system", 
-          content: `You are the AI Stylist assistant. Help users with fashion, style advice, and outfit recommendations based on their analysis.${userContext}\n\nKeep advice concise and encouraging.` 
+        {
+          role: "system",
+          content: `You are the AI Stylist assistant. Help users with fashion, style advice, and outfit recommendations based on their analysis.${userContext}\n\nKeep advice concise and encouraging.`
         },
         ...messages
       ],

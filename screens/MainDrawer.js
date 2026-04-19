@@ -78,8 +78,8 @@ export default function MainDrawer() {
                 name="GenerateOutfit"
                 component={GenerateOutfitScreen}
                 options={{
-                    title: 'Generate Outfit',
-                    drawerIcon: ({ color, size }) => <Ionicons name="color-wand-outline" size={size} color={color} />
+                    title: 'Style Anything',
+                    drawerIcon: ({ color, size }) => <Ionicons name="sparkles-outline" size={size} color={color} />
                 }}
             />
             <Drawer.Screen

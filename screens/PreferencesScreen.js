@@ -14,6 +14,8 @@ export default function PreferencesScreen({ navigation, route }) {
   const [gender, setGender] = useState("");
   
   const existingPrefs = route?.params?.userPreferences || {};
+  const userId = route?.params?.userId ?? null;
+  const isGuest = route?.params?.isGuest || false;
   const isNight = existingPrefs.timeOfDay === "Night";
 
   const theme = {
@@ -152,6 +154,8 @@ export default function PreferencesScreen({ navigation, route }) {
         <TouchableOpacity
           style={[styles.button, { backgroundColor: theme.selected }]}
           onPress={() => navigation.navigate("Upload", {
+            userId,
+            isGuest,
             userPreferences: {
               ...existingPrefs,
               gender: gender,

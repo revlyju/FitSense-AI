@@ -7,7 +7,9 @@ import {
   ScrollView,
 } from "react-native";
 
-export default function OnboardingScreen({ navigation }) {
+export default function OnboardingScreen({ navigation, route }) {
+  const userId = route?.params?.userId ?? null;
+  const isGuest = route?.params?.isGuest || false;
   const [weather, setWeather] = useState("");
   const [time, setTime] = useState("Day");
   const [occasion, setOccasion] = useState("");
@@ -146,6 +148,8 @@ export default function OnboardingScreen({ navigation }) {
         <TouchableOpacity
           style={[styles.button, { backgroundColor: theme.selected }]}
           onPress={() => navigation.navigate("Preferences", {
+            userId,
+            isGuest,
             userPreferences: {
               timeOfDay: time,
               occasion,

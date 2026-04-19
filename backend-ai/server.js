@@ -1270,7 +1270,8 @@ app.post("/analyze-style", async (req, res) => {
         contentType: parsedImage.mimeType || 'image/jpeg'
       });
 
-      const pyResponse = await axios.post('http://localhost:8000/analyze-face', form, {
+      const pythonUrl = process.env.PYTHON_API_URL || 'http://localhost:8000';
+      const pyResponse = await axios.post(`${pythonUrl}/analyze-face`, form, {
         headers: {
           ...form.getHeaders()
         },

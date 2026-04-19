@@ -11,7 +11,9 @@ const LoadingScreen = ({ navigation, route }) => {
     ...routeUserPreferences,
     image: routeUserPreferences.image || routeImage,
   };
-  const userId = route?.params?.userId ?? null;
+  // Explicit guest flag passed through the flow
+  const isGuest = route?.params?.isGuest || false;
+  const routeUserId = route?.params?.userId;
 
   const isNight = userPreferences.timeOfDay === "Night";
 
@@ -41,8 +43,9 @@ const LoadingScreen = ({ navigation, route }) => {
         } else if (rawGender.includes('male') || rawGender === 'man' || rawGender === 'men') {
           userGender = 'men';
         }
-        let activeUserId = userId;
-        if (!activeUserId) {
+        let activeUserId = routeUserId ?? null;
+        // Only fallback to AsyncStorage if NOT an explicit guest and userId is missing
+        if (!isGuest && routeUserId === undefined) {
           try {
             activeUserId = await AsyncStorage.getItem('userId');
           } catch (e) {
@@ -84,7 +87,7 @@ const LoadingScreen = ({ navigation, route }) => {
           console.error("Failed to auto-save analysis locally", e);
         }
 
-        if (activeUserId) {
+        if (activeUserId && !isGuest) {
           try {
             await axios.post(`${API_BASE_URL}/style-profile`, {
               userId: activeUserId,
@@ -101,16 +104,17 @@ const LoadingScreen = ({ navigation, route }) => {
           } catch (e) {
             console.error('Failed to save style profile', e?.response?.data || e.message);
           }
-
+ 
           navigation.replace('Main', {
             screen: 'DashboardRoot',
             params: { userId: activeUserId }
           });
         } else {
           navigation.replace("Results", {
-  analysisResults: response.data,
-  userPreferences,
-});
+            analysisResults: response.data,
+            userPreferences,
+            isGuest: true, // explicitly tell ResultsScreen it's a guest
+          });
         }
       } catch (error) {
         console.error('Analysis error:', error);

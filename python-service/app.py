@@ -199,7 +199,20 @@ async def analyze_face(file: UploadFile = File(...)):
         censored_image = image_bgr.copy()
 
         if cx2 > cx1 and cy2 > cy1:
-            cv2.rectangle(censored_image, (cx1, cy1), (cx2, cy2), (0, 0, 0), -1)
+            # ROI for the face
+            face_roi = censored_image[cy1:cy2, cx1:cx2]
+            
+            # Apply a strong Gaussian blur to anonymize the face
+            # ksize must be odd. We'll use a size based on face width.
+            ksize = int((cx2 - cx1) / 4)
+            if ksize % 2 == 0: ksize += 1
+            if ksize < 3: ksize = 3
+            
+            blurred_face = cv2.GaussianBlur(face_roi, (ksize, ksize), 30)
+            censored_image[cy1:cy2, cx1:cx2] = blurred_face
+            print(f"PIPELINE SUCCESS: Face detected and blurred at [{cx1}, {cy1}, {cx2}, {cy2}]")
+        else:
+            print("PIPELINE WARNING: Face landmarks found but bounding box invalid.")
 
         _, buffer = cv2.imencode(".jpg", censored_image)
 
@@ -207,6 +220,8 @@ async def analyze_face(file: UploadFile = File(...)):
             "faceShape": face_shape,
             "contrastLevel": contrast,
             "censoredImage": base64.b64encode(buffer).decode("utf-8"),
+            "status": "success",
+            "detectedLandmarks": len(points)
         }
 
     except Exception as e:

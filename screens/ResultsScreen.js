@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  Easing,
   FlatList,
   Linking,
   ScrollView,
@@ -61,7 +63,26 @@ function normalizeColorList(list) {
 const ResultsScreen = ({ navigation, route }) => {
   const analysisResults = route?.params?.analysisResults;
   const userPreferences = route?.params?.userPreferences;
+  const isGuestParam = route?.params?.isGuest === true;
   const [savedLooks, setSavedLooks] = useState([]);
+  const [isActuallyGuest, setIsActuallyGuest] = useState(isGuestParam);
+
+  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(40)).current;
+
+  useEffect(() => {
+    // Cross-check with local storage to be safe, but prioritize the explicit flag
+    if (!isActuallyGuest) {
+      AsyncStorage.getItem('userId').then(id => {
+        setIsActuallyGuest(!id);
+      }).catch(() => setIsActuallyGuest(true));
+    }
+
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 700, easing: Easing.out(Easing.exp), useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 700, easing: Easing.out(Easing.exp), useNativeDriver: true }),
+    ]).start();
+  }, []);
 
   useEffect(() => {
     if (!analysisResults || !userPreferences) {
@@ -146,51 +167,70 @@ const ResultsScreen = ({ navigation, route }) => {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Back</Text>
-        </TouchableOpacity>
+      {/* Header */}
+      <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+        {/* Back arrow only for logged-in users who came from a previous screen */}
+        {!isActuallyGuest ? (
+          <TouchableOpacity onPress={handleBack} style={styles.backButton} activeOpacity={0.7}>
+            <Ionicons name="arrow-back" size={22} color="#25344F" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.backButton} />
+        )}
         <Text style={styles.title}>Your Style Profile</Text>
-        <View style={{ flex: 1 }} />
-        <TouchableOpacity onPress={handleGoToDashboard} style={styles.dashboardButton}>
-          <Ionicons name="home" size={24} color="#25344F" />
-        </TouchableOpacity>
-      </View>
+        {!isActuallyGuest ? (
+          <TouchableOpacity onPress={handleGoToDashboard} style={styles.dashboardButton} activeOpacity={0.7}>
+            <Ionicons name="home" size={22} color="#25344F" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.dashboardButton} />
+        )}
+      </Animated.View>
+
+      {/* Guest CTA Banner */}
+      {isActuallyGuest && (
+        <View style={styles.guestBanner}>
+          <Ionicons name="lock-closed-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.guestBannerTitle}>Want to save your results?</Text>
+            <Text style={styles.guestBannerSub}>Create a free account to save and track your style profile.</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.guestBannerBtn}
+            onPress={() => navigation.replace('Auth')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.guestBannerBtnText}>Sign Up</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.summarySection}>
         <Text style={styles.sectionTitle}>Style Summary</Text>
         <View style={styles.summaryCard}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Face Shape</Text>
-            <Text style={styles.summaryValue}>{analysisResults.faceShape || 'Not Detected'}</Text>
-          </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Body Shape</Text>
-            <Text style={styles.summaryValue}>{analysisResults.bodyShape || 'Not Detected'}</Text>
-          </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Undertone</Text>
-            <Text style={styles.summaryValue}>{analysisResults.undertone}</Text>
-          </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Contrast Level</Text>
-            <Text style={styles.summaryValue}>{analysisResults.contrastLevel}</Text>
-          </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Color Season</Text>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.summaryValue}>{analysisResults.colorSeason}</Text>
-              {analysisResults.colorSeasonConfidence ? (
-                <Text style={styles.confidenceText}>Confidence: {analysisResults.colorSeasonConfidence}%</Text>
-              ) : null}
+          {[
+            { label: 'Face Shape', value: analysisResults.faceShape || 'Not Detected' },
+            { label: 'Body Shape', value: analysisResults.bodyShape || 'Not Detected' },
+            { label: 'Undertone',  value: analysisResults.undertone },
+            { label: 'Contrast',   value: analysisResults.contrastLevel },
+            { label: 'Color Season', value: analysisResults.colorSeason },
+          ].map(({ label, value }, i) => (
+            <View key={i}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>{label}</Text>
+                <View style={styles.summaryValueChip}>
+                  <Text style={styles.summaryValue}>{value}</Text>
+                </View>
+              </View>
+              {i < 4 && <View style={styles.summaryDivider} />}
             </View>
-          </View>
-          <View style={styles.summaryDivider} />
-          <Text style={styles.summaryText}>{analysisResults.summaryExplanation}</Text>
+          ))}
+          {analysisResults.colorSeasonConfidence ? (
+            <Text style={styles.confidenceText}>Confidence: {analysisResults.colorSeasonConfidence}%</Text>
+          ) : null}
+          {analysisResults.summaryExplanation ? (
+            <Text style={styles.summaryText}>{analysisResults.summaryExplanation}</Text>
+          ) : null}
         </View>
       </View>
 
@@ -297,13 +337,37 @@ const ResultsScreen = ({ navigation, route }) => {
       </View>
 
       <View style={styles.actionSection}>
-        <TouchableOpacity style={styles.actionButton} onPress={handleSaveLook}>
+        <TouchableOpacity style={styles.actionButton} onPress={handleSaveLook} activeOpacity={0.85}>
+          <Ionicons name="bookmark-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
           <Text style={styles.actionButtonText}>Save Look</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={handleShareLook}>
-          <Text style={[styles.actionButtonText, styles.shareButtonText]}>Share Look</Text>
+        <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={handleShareLook} activeOpacity={0.85}>
+          <Ionicons name="share-social-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+          <Text style={[styles.actionButtonText, styles.shareButtonText]}>Share</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Guest bottom CTA */}
+      {isActuallyGuest && (
+        <View style={styles.guestBottomSection}>
+          <TouchableOpacity
+            style={styles.guestStartOverBtn}
+            onPress={() => navigation.replace('Onboarding')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="refresh-outline" size={18} color="#25344F" style={{ marginRight: 8 }} />
+            <Text style={styles.guestStartOverText}>Try Again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.guestSignUpBtn}
+            onPress={() => navigation.replace('Auth')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="person-add-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.guestSignUpText}>Create Account & Save Profile</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.spacer} />
     </ScrollView>
@@ -312,66 +376,101 @@ const ResultsScreen = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
   container: {
-  flex: 1,
-  backgroundColor: '#D5B893',
-  paddingTop: 50,
-},
+    flex: 1,
+    backgroundColor: '#D5B893',
+    paddingTop: 50,
+  },
 
   header: {
-  paddingHorizontal: 20,
-  paddingTop: 20,
-  marginBottom: 25,
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 10,
-},
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 
-  backButtonText: {
-    fontSize: 16,
-    color: '#25344F',
-    fontWeight: '600',
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(37,52,79,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  dashboardButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(37,52,79,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   title: {
-  fontSize: 22,
-  fontWeight: '700',
-  color: '#25344F',
-  marginLeft: 10,
-},
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#25344F',
+    letterSpacing: -0.5,
+  },
 
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '800',
     color: '#25344F',
     marginBottom: 12,
+    letterSpacing: -0.3,
   },
 
   summarySection: {
     paddingHorizontal: 20,
-    marginBottom: 25,
+    marginBottom: 24,
   },
 
   summaryCard: {
-    backgroundColor: '#EAD8C5',
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#25344F',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
   },
 
   summaryLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#6F4D38',
+    fontWeight: '500',
+  },
+
+  summaryValueChip: {
+    backgroundColor: '#F5EDE0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: '#EAD8C5',
   },
 
   summaryValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#25344F',
   },
 
   summaryDivider: {
     height: 1,
-    backgroundColor: '#EAD8C5',
-    marginVertical: 8,
+    backgroundColor: '#F5EDE0',
+    marginVertical: 2,
   },
 
   summaryText: {
@@ -400,13 +499,18 @@ const styles = StyleSheet.create({
 
   jewelrySection: {
     paddingHorizontal: 20,
-    marginBottom: 25,
+    marginBottom: 24,
   },
 
   jewelryCard: {
-    backgroundColor: '#EAD8C5',
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#25344F',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
   },
 
   jewelryLabel: {
@@ -496,29 +600,115 @@ const styles = StyleSheet.create({
   actionSection: {
     paddingHorizontal: 20,
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 30,
+    gap: 12,
+    marginBottom: 36,
   },
 
   actionButton: {
     flex: 1,
     backgroundColor: '#632024',
-    paddingVertical: 14,
-    borderRadius: 10,
+    paddingVertical: 16,
+    borderRadius: 14,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    shadowColor: '#632024',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
   },
 
   shareButton: {
     backgroundColor: '#25344F',
+    shadowColor: '#25344F',
   },
 
   actionButtonText: {
     color: '#fff',
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 15,
   },
 
   spacer: {
     height: 20,
+  },
+
+  // Guest experience styles
+  guestBanner: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    backgroundColor: '#25344F',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#25344F',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  guestBannerTitle: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+    marginBottom: 3,
+  },
+  guestBannerSub: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  guestBannerBtn: {
+    backgroundColor: '#632024',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginLeft: 10,
+  },
+  guestBannerBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  guestBottomSection: {
+    paddingHorizontal: 20,
+    gap: 12,
+    marginBottom: 20,
+  },
+  guestStartOverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(37,52,79,0.25)',
+    backgroundColor: 'rgba(234,216,197,0.6)',
+  },
+  guestStartOverText: {
+    color: '#25344F',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  guestSignUpBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 14,
+    backgroundColor: '#632024',
+    shadowColor: '#632024',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  guestSignUpText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
   },
 });
 

@@ -14,7 +14,8 @@ export default function UploadScreen({ navigation, route }) {
   const [imageUri, setImageUri] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
   const userPreferences = route?.params?.userPreferences || {};
-  
+  const userId = route?.params?.userId ?? null;
+  const isGuest = route?.params?.isGuest || false;
   const isNight = userPreferences.timeOfDay === "Night";
 
   const theme = {
@@ -68,6 +69,8 @@ export default function UploadScreen({ navigation, route }) {
     }
 
     navigation.navigate('Loading', {
+      userId,
+      isGuest,
       userPreferences: {
         ...userPreferences,
         image: `data:image/jpeg;base64,${imageBase64}`,

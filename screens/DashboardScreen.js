@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Mock Data / Structure for UI
@@ -22,6 +22,26 @@ export default function DashboardScreen({ navigation, route }) {
     const { theme, isDark } = useTheme();
     const userId = route?.params?.userId || null;
     const [loading, setLoading] = useState(true);
+
+    // Section entrance animations
+    const headerAnim = useRef(new Animated.Value(0)).current;
+    const sec1Anim   = useRef(new Animated.Value(0)).current;
+    const sec2Anim   = useRef(new Animated.Value(0)).current;
+    const sec3Anim   = useRef(new Animated.Value(0)).current;
+    const sec4Anim   = useRef(new Animated.Value(0)).current;
+
+    const runEntranceAnimation = () => {
+        [headerAnim, sec1Anim, sec2Anim, sec3Anim, sec4Anim].forEach(a => a.setValue(0));
+        Animated.stagger(90, [
+            headerAnim, sec1Anim, sec2Anim, sec3Anim, sec4Anim
+        ].map(a => Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.exp), useNativeDriver: true })))
+        .start();
+    };
+
+    const slideIn = (anim) => ({
+        opacity: anim,
+        transform: [{ translateY: anim.interpolate({ inputRange: [0,1], outputRange: [24, 0] }) }]
+    });
     const [profile, setProfile] = useState(null);
     const [ootd, setOotd] = useState(null);
     const [recommendations, setRecommendations] = useState([]);
@@ -181,10 +201,14 @@ export default function DashboardScreen({ navigation, route }) {
         return unsubscribe;
     }, [userId, navigation]);
 
+    useEffect(() => {
+        if (!loading) runEntranceAnimation();
+    }, [loading]);
+
     if (loading) {
         return (
             <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
-                <ActivityIndicator size="large" color={theme.accent} />
+                <ActivityIndicator size="large" color="#632024" />
                 <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Curating your look...</Text>
             </View>
         );
@@ -193,21 +217,21 @@ export default function DashboardScreen({ navigation, route }) {
     return (
         <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
             {/* 1. Welcome Header */}
-            <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+            <Animated.View style={[styles.header, slideIn(headerAnim)]}>
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                    <Ionicons name="menu-outline" size={28} color={theme.text} />
+                    <Ionicons name="menu-outline" size={28} color="#25344F" />
                 </TouchableOpacity>
                 <View style={styles.headerTitleContainer}>
-                    <Text style={[styles.greeting, { color: theme.text }]}>Welcome back, {profile?.name || 'User'}</Text>
-                    <Text style={[styles.tagline, { color: theme.textSecondary }]}>Your AI stylist is ready.</Text>
+                    <Text style={styles.greeting}>Hey, {profile?.name || 'Stylist'} 👋</Text>
+                    <Text style={styles.tagline}>Your curated looks await.</Text>
                 </View>
-                <TouchableOpacity style={[styles.profileAvatar, { backgroundColor: isDark ? theme.accent : '#C6A57A' }]}>
-                    <Text style={styles.avatarText}>{profile?.name ? profile.name[0] : 'U'}</Text>
+                <TouchableOpacity style={styles.profileAvatar}>
+                    <Text style={styles.avatarText}>{profile?.name ? profile.name[0].toUpperCase() : 'U'}</Text>
                 </TouchableOpacity>
-            </View>
+            </Animated.View>
 
             {/* 2. Outfit of the Day */}
-            <View style={styles.section}>
+            <Animated.View style={[styles.section, slideIn(sec1Anim)]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
                      <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Outfit of the Day</Text>
                      {ootd && (
@@ -279,10 +303,10 @@ export default function DashboardScreen({ navigation, route }) {
                 ) : (
                     <Text style={{ color: '#6F4D38' }}>No Outfit of the Day available.</Text>
                 )}
-            </View>
+            </Animated.View>
 
             {/* styling history extension */}
-            <View style={styles.section}>
+            <Animated.View style={[styles.section, slideIn(sec2Anim)]}>
                 <Text style={styles.sectionTitle}>Styling History</Text>
                 {stylingHistory.length > 0 ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
@@ -306,31 +330,45 @@ export default function DashboardScreen({ navigation, route }) {
                 ) : (
                     <Text style={{ color: '#6F4D38' }}>No styling history available yet.</Text>
                 )}
-            </View>
+            </Animated.View>
 
             {/* 3. Recommended Outfits */}
-            <View style={styles.section}>
+            <Animated.View style={[styles.section, slideIn(sec3Anim)]}>
                 <Text style={styles.sectionTitle}>Recommended For You</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
                     {recommendations.length > 0 ? recommendations.map((rec, idx) => (
-                        <View key={rec._id || rec.id || idx.toString()} style={styles.recCard}>
+                        <TouchableOpacity
+                            key={rec._id || rec.id || idx.toString()}
+                            style={styles.recCard}
+                            onPress={() => handleOpenModal(rec)}
+                            activeOpacity={0.88}
+                        >
                             {rec.imageUrl ? (
-                                <TouchableOpacity onPress={() => handleOpenModal(rec)}>
-                                    <Image source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }} style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 12, backgroundColor: '#fff' }} resizeMode="contain" />
-                                </TouchableOpacity>
-                            ) : null}
-                            <Text style={styles.recTitle}>{rec.type || 'Outfit'}</Text>
-                            <Text style={styles.recOccasion}>Score: {rec.score}/10</Text>
-                            <Text style={styles.recDesc}>{rec.matchReasons}</Text>
-                        </View>
+                                <Image
+                                    source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }}
+                                    style={{ width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#F5EDE0' }}
+                                    resizeMode="cover"
+                                />
+                            ) : (
+                                <View style={{ width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#F5EDE0', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Ionicons name="shirt-outline" size={40} color="#C6A57A" />
+                                </View>
+                            )}
+                            <View style={styles.recScoreRow}>
+                                <Ionicons name="star" size={12} color="#632024" />
+                                <Text style={styles.recScoreText}> {rec.score}/10</Text>
+                            </View>
+                            <Text style={styles.recTitle} numberOfLines={1}>{rec.type || 'Outfit'}</Text>
+                            <Text style={styles.recDesc} numberOfLines={2}>{rec.matchReasons}</Text>
+                        </TouchableOpacity>
                     )) : (
                         <Text style={{ marginLeft: 20, color: '#6F4D38' }}>No recommendations found.</Text>
                     )}
                 </ScrollView>
-            </View>
+            </Animated.View>
 
             {/* 4. Jewellery Recommendations */}
-            <View style={styles.section}>
+            <Animated.View style={[styles.section, slideIn(sec4Anim)]}>
                 <Text style={styles.sectionTitle}>Jewellery Match</Text>
                 <View style={styles.jewelGrid}>
                     <View style={styles.jewelCard}>
@@ -344,7 +382,7 @@ export default function DashboardScreen({ navigation, route }) {
                         <Text style={styles.jewelSub}>Leather or mesh band</Text>
                     </View>
                 </View>
-            </View>
+            </Animated.View>
 
             {/* 5. Wardrobe Must-Haves */}
             <View style={styles.section}>
@@ -352,7 +390,7 @@ export default function DashboardScreen({ navigation, route }) {
                 <View style={styles.mustHavesCard}>
                     {getWardrobeEssentials(profile?.season, profile?.bodyShape).map((item, idx) => (
                         <View key={idx} style={styles.checkListItem}>
-                            <Ionicons name="checkmark-circle-outline" size={22} color="#632024" />
+                            <Ionicons name="checkmark-circle" size={20} color="#632024" />
                             <Text style={styles.checkListText}>{item}</Text>
                         </View>
                     ))}
@@ -400,11 +438,23 @@ export default function DashboardScreen({ navigation, route }) {
             </View>
 
             {/* 7. Quick Actions */}
-            <View style={[styles.section, { paddingBottom: 60 }]}>
+            <View style={[styles.section, { paddingBottom: 70 }]}>
                 <Text style={styles.sectionTitle}>Quick Actions</Text>
-                <TouchableOpacity style={styles.actionButtonMain} onPress={() => { navigation.navigate('Onboarding', { userId }); }}>
+                <TouchableOpacity
+                    style={styles.actionButtonMain}
+                    onPress={() => navigation.navigate('Onboarding', { userId })}
+                    activeOpacity={0.85}
+                >
                     <Ionicons name="color-wand" size={20} color="#fff" />
                     <Text style={styles.actionButtonMainText}>Update My Style Profile</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.actionButtonSecondary}
+                    onPress={() => navigation.navigate('AIChatbot')}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="chatbubbles-outline" size={20} color="#25344F" />
+                    <Text style={styles.actionButtonSecondaryText}>Chat with AI Stylist</Text>
                 </TouchableOpacity>
             </View>
 
@@ -441,11 +491,16 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 20,
-        paddingTop: 60,
-        paddingBottom: 20,
+        paddingTop: 62,
+        paddingBottom: 22,
         backgroundColor: '#EAD8C5',
         borderBottomWidth: 1,
-        borderBottomColor: '#C6A57A',
+        borderBottomColor: 'rgba(198,165,122,0.5)',
+        shadowColor: '#25344F',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.07,
+        shadowRadius: 8,
+        elevation: 4,
     },
     menuButton: {
         padding: 4,
@@ -455,47 +510,55 @@ const styles = StyleSheet.create({
         marginHorizontal: 16,
     },
     greeting: {
-        fontSize: 20,
+        fontSize: 19,
         fontWeight: '700',
         color: '#25344F',
+        letterSpacing: -0.3,
     },
     tagline: {
-        fontSize: 14,
+        fontSize: 13,
         color: '#6F4D38',
-        marginTop: 4,
+        marginTop: 3,
+        fontWeight: '500',
     },
     profileAvatar: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#C6A57A',
+        width: 46,
+        height: 46,
+        borderRadius: 23,
+        backgroundColor: '#632024',
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: '#632024',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
     },
     avatarText: {
         fontSize: 18,
-        fontWeight: '700',
-        color: '#25344F',
+        fontWeight: '800',
+        color: '#fff',
     },
     section: {
         paddingHorizontal: 20,
-        marginTop: 32,
+        marginTop: 28,
     },
     sectionTitle: {
-        fontSize: 18,
-        fontWeight: '700',
+        fontSize: 17,
+        fontWeight: '800',
         color: '#25344F',
-        marginBottom: 16,
+        marginBottom: 14,
+        letterSpacing: -0.3,
     },
     ootdCard: {
         backgroundColor: '#EAD8C5',
         borderRadius: 24,
-        padding: 24,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        elevation: 3,
+        padding: 22,
+        shadowColor: '#25344F',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.10,
+        shadowRadius: 14,
+        elevation: 5,
     },
     ootdBadge: {
         alignSelf: 'flex-start',
@@ -565,34 +628,44 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
     },
     recCard: {
-        width: 260,
-        backgroundColor: '#EAD8C5',
+        width: 220,
+        backgroundColor: '#fff',
         borderRadius: 20,
-        padding: 20,
-        marginRight: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        elevation: 2,
+        padding: 14,
+        marginRight: 14,
+        shadowColor: '#25344F',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        elevation: 3,
+    },
+    recScoreRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    recScoreText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#632024',
     },
     recTitle: {
-        fontSize: 18,
+        fontSize: 15,
         fontWeight: '700',
         color: '#25344F',
-        marginBottom: 6,
+        marginBottom: 4,
     },
     historyCard: {
         width: 180,
-        backgroundColor: '#EAD8C5',
+        backgroundColor: '#fff',
         borderRadius: 16,
         padding: 16,
-        marginRight: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        elevation: 2,
+        marginRight: 14,
+        shadowColor: '#25344F',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+        elevation: 3,
     },
     historyDate: {
         fontSize: 12,
@@ -717,33 +790,34 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 18,
         borderRadius: 16,
-        marginBottom: 16,
+        marginBottom: 12,
+        shadowColor: '#632024',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.32,
+        shadowRadius: 14,
+        elevation: 8,
     },
     actionButtonMainText: {
         color: '#fff',
         fontSize: 16,
         fontWeight: '700',
         marginLeft: 10,
-    },
-    actionRow: {
-        flexDirection: 'row',
-        gap: 16,
+        letterSpacing: 0.2,
     },
     actionButtonSecondary: {
-        flex: 1,
         backgroundColor: '#EAD8C5',
-        flexDirection: 'column',
+        flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        paddingVertical: 24,
+        paddingVertical: 16,
         borderRadius: 16,
-        borderWidth: 1,
-        borderColor: '#eee',
+        borderWidth: 1.5,
+        borderColor: 'rgba(198,165,122,0.5)',
     },
     actionButtonSecondaryText: {
         color: '#25344F',
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: '600',
-        marginTop: 12,
+        marginLeft: 8,
     }
 });

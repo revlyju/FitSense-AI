@@ -15,8 +15,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import DbOutfitCard from '../components/DbOutfitCard';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function MyStyleProfileScreen({ navigation }) {
+    const { theme, isDark } = useTheme();
     const [userId, setUserId] = useState(null);
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -49,24 +51,24 @@ export default function MyStyleProfileScreen({ navigation }) {
 
     if (loading) {
         return (
-            <View style={[styles.container, styles.center]}>
-                <ActivityIndicator size="large" color="#632024" />
+            <View style={[styles.container, styles.center, { backgroundColor: theme.background }]}>
+                <ActivityIndicator size="large" color={theme.accent} />
             </View>
         );
     }
 
     if (!profile) {
         return (
-            <View style={styles.container}>
-                <View style={styles.header}>
+            <View style={[styles.container, { backgroundColor: theme.background }]}>
+                <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
                     <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                        <Ionicons name="menu-outline" size={28} color="#25344F" />
+                        <Ionicons name="menu-outline" size={28} color={theme.text} />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Liked Outfits</Text>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Liked Outfits</Text>
                 </View>
                 <View style={styles.center}>
-                    <Ionicons name="heart-outline" size={64} color="#ccc" />
-                    <Text style={styles.emptyText}>Please login to see your liked outfits</Text>
+                    <Ionicons name="heart-outline" size={64} color={theme.textSecondary} />
+                    <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Please login to see your liked outfits</Text>
                 </View>
             </View>
         );
@@ -76,12 +78,12 @@ export default function MyStyleProfileScreen({ navigation }) {
     const hasMemory = styleMemory && styleMemory.interactionCount > 0;
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                    <Ionicons name="menu-outline" size={28} color="#25344F" />
+                    <Ionicons name="menu-outline" size={28} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Liked Outfits</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>Liked Outfits</Text>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>

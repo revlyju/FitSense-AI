@@ -1,19 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Alert, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
+import { useTheme } from '../contexts/ThemeContext';
 
 const { width } = Dimensions.get('window');
 
-export default function VirtualTryonScreen({ navigation }) {
+export default function VirtualTryonScreen({ navigation, route }) {
+    const { theme, isDark } = useTheme();
     const [personImage, setPersonImage] = useState(null);
     const [outfitImage, setOutfitImage] = useState(null);
     const [resultImage, setResultImage] = useState(null);
     const [isGenerating, setIsGenerating] = useState(false);
 
-    const pickImage = async (setImageBase64) => {
+    // Accept garment image from navigation params (e.g. from OutfitDetailsModal)
+    useEffect(() => {
+        if (route?.params?.garmentImageUri) {
+            setOutfitImage(route.params.garmentImageUri);
+        }
+    }, [route?.params?.garmentImageUri]);
+
+    const pickImage = async (setImageCallback) => {
         try {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (status !== 'granted') {
@@ -24,14 +33,14 @@ export default function VirtualTryonScreen({ navigation }) {
             const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ['images'],
                 allowsEditing: true,
-                quality: 0.5, // Downsize aggressively for memory limits
+                quality: 0.5,
                 base64: true,
             });
 
             if (!result.canceled && result.assets && result.assets.length > 0) {
                 const asset = result.assets[0];
                 const base64URI = `data:image/jpeg;base64,${asset.base64}`;
-                setImageBase64(base64URI);
+                setImageCallback(base64URI);
             }
         } catch (error) {
             console.error('Image picker error:', error);
@@ -52,9 +61,9 @@ export default function VirtualTryonScreen({ navigation }) {
             const response = await axios.post(`${API_BASE_URL}/virtual-tryon`, {
                 personImage,
                 outfitImage,
-                category: "tops" // Currently defaulted to tops based on implementation plan params mappings
+                category: "tops"
             }, {
-                timeout: 120000 // Give the backend 2 minutes limit for intense visual generation
+                timeout: 120000
             });
 
             if (response.data.success && response.data.resultImage) {
@@ -71,42 +80,42 @@ export default function VirtualTryonScreen({ navigation }) {
     };
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                    <Ionicons name="menu-outline" size={28} color="#25344F" />
+                    <Ionicons name="menu-outline" size={28} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Virtual Try-On</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>Virtual Try-On</Text>
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 
-                <Text style={styles.infoText}>Upload a clear photo of yourself and a clothing item you want to try on. Our AI precision models will seamlessly map the garment onto you.</Text>
+                <Text style={[styles.infoText, { color: theme.textSecondary }]}>Upload a clear photo of yourself and a clothing item you want to try on. Our AI precision models will seamlessly map the garment onto you.</Text>
                 
                 <View style={styles.uploadSection}>
                     <View style={styles.uploadBox}>
-                        <Text style={styles.uploadLabel}>Your Photo</Text>
-                        <TouchableOpacity style={styles.pickerTile} onPress={() => pickImage(setPersonImage)}>
+                        <Text style={[styles.uploadLabel, { color: theme.text }]}>Your Photo</Text>
+                        <TouchableOpacity style={[styles.pickerTile, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={() => pickImage(setPersonImage)}>
                             {personImage ? (
                                 <Image source={{ uri: personImage }} style={styles.previewImage} />
                             ) : (
                                 <View style={styles.placeholder}>
-                                    <Ionicons name="person-add-outline" size={32} color="#6F4D38" />
-                                    <Text style={styles.placeholderText}>Tap to Upload</Text>
+                                    <Ionicons name="person-add-outline" size={32} color={theme.textSecondary} />
+                                    <Text style={[styles.placeholderText, { color: theme.textSecondary }]}>Tap to Upload</Text>
                                 </View>
                             )}
                         </TouchableOpacity>
                     </View>
 
                     <View style={styles.uploadBox}>
-                        <Text style={styles.uploadLabel}>Garment</Text>
-                        <TouchableOpacity style={styles.pickerTile} onPress={() => pickImage(setOutfitImage)}>
+                        <Text style={[styles.uploadLabel, { color: theme.text }]}>Garment</Text>
+                        <TouchableOpacity style={[styles.pickerTile, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={() => pickImage(setOutfitImage)}>
                             {outfitImage ? (
-                                <Image source={{ uri: outfitImage }} style={styles.previewImage} />
+                                <Image source={{ uri: outfitImage }} style={styles.previewImage} resizeMode="contain" />
                             ) : (
                                 <View style={styles.placeholder}>
-                                    <Ionicons name="shirt-outline" size={32} color="#6F4D38" />
-                                    <Text style={styles.placeholderText}>Tap to Upload</Text>
+                                    <Ionicons name="shirt-outline" size={32} color={theme.textSecondary} />
+                                    <Text style={[styles.placeholderText, { color: theme.textSecondary }]}>Tap to Upload</Text>
                                 </View>
                             )}
                         </TouchableOpacity>
@@ -114,7 +123,7 @@ export default function VirtualTryonScreen({ navigation }) {
                 </View>
 
                 <TouchableOpacity 
-                    style={[styles.generateButton, (!personImage || !outfitImage || isGenerating) && styles.generateButtonDisabled]} 
+                    style={[styles.generateButton, { backgroundColor: theme.accent }, (!personImage || !outfitImage || isGenerating) && styles.generateButtonDisabled]} 
                     onPress={handleTryOn} 
                     disabled={!personImage || !outfitImage || isGenerating}
                 >
@@ -130,8 +139,8 @@ export default function VirtualTryonScreen({ navigation }) {
 
                 {resultImage && (
                     <View style={styles.resultSection}>
-                        <Text style={styles.resultTitle}>Your New Look</Text>
-                        <Image source={{ uri: resultImage }} style={styles.resultImage} resizeMode="cover" />
+                        <Text style={[styles.resultTitle, { color: theme.text }]}>Your New Look</Text>
+                        <Image source={{ uri: resultImage }} style={[styles.resultImage, { borderColor: theme.border }]} resizeMode="cover" />
                     </View>
                 )}
 
@@ -141,19 +150,17 @@ export default function VirtualTryonScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#FAF9F6' },
+    container: { flex: 1 },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 20,
         paddingTop: 60,
         paddingBottom: 20,
-        backgroundColor: '#fff',
         borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0'
     },
     menuButton: { marginRight: 15 },
-    headerTitle: { fontSize: 20, fontWeight: '700', color: '#25344F' },
+    headerTitle: { fontSize: 20, fontWeight: '700' },
     
     scrollContent: {
         padding: 20,
@@ -161,7 +168,6 @@ const styles = StyleSheet.create({
     },
     infoText: {
         fontSize: 14,
-        color: '#6F4D38',
         lineHeight: 22,
         marginBottom: 20,
         textAlign: 'center'
@@ -178,15 +184,12 @@ const styles = StyleSheet.create({
     uploadLabel: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#25344F',
         marginBottom: 8,
         textAlign: 'center'
     },
     pickerTile: {
         height: 180,
-        backgroundColor: '#fff',
         borderWidth: 2,
-        borderColor: '#D5B893',
         borderStyle: 'dashed',
         borderRadius: 12,
         overflow: 'hidden',
@@ -203,12 +206,10 @@ const styles = StyleSheet.create({
     },
     placeholderText: {
         marginTop: 8,
-        color: '#6F4D38',
         fontSize: 12,
         fontWeight: '500'
     },
     generateButton: {
-        backgroundColor: '#632024',
         paddingVertical: 16,
         borderRadius: 12,
         alignItems: 'center',
@@ -221,9 +222,7 @@ const styles = StyleSheet.create({
         marginBottom: 30
     },
     generateButtonDisabled: {
-        backgroundColor: '#a6a6a6',
-        shadowOpacity: 0,
-        elevation: 0
+        opacity: 0.5,
     },
     generatingContents: {
         flexDirection: 'row',
@@ -242,7 +241,6 @@ const styles = StyleSheet.create({
     resultTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#25344F',
         marginBottom: 15
     },
     resultImage: {
@@ -250,6 +248,5 @@ const styles = StyleSheet.create({
         height: (width - 40) * 1.3,
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#D5B893'
     }
 });

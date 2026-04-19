@@ -16,8 +16,10 @@ import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { getWardrobeEssentials } from '../constants/wardrobeEssentials';
 import OutfitDetailsModal from '../components/OutfitDetailsModal';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function DashboardScreen({ navigation, route }) {
+    const { theme, isDark } = useTheme();
     const userId = route?.params?.userId || null;
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState(null);
@@ -76,7 +78,13 @@ export default function DashboardScreen({ navigation, route }) {
             if (userId) {
                 const response = await axios.get(`${API_BASE_URL}/user-profile/${userId}`);
                 if (response.data) {
-                    setProfile(response.data);
+                    const insights = response.data.analysis || {};
+                    setProfile({
+                        ...response.data,
+                        season: insights.colorSeason || 'Unknown',
+                        undertone: insights.undertone || 'Unknown',
+                        bestColors: [...(insights.bestNeutrals || []), ...(insights.bestAccentColors || [])]
+                    });
                     // Use user-profile instead of dashboard for full data access
                     const dashRes = await axios.get(`${API_BASE_URL}/api/dashboard/${userId}`);
                     if (dashRes.data.success) {
@@ -104,7 +112,14 @@ export default function DashboardScreen({ navigation, route }) {
                     const response = await axios.get(`${API_BASE_URL}/api/dashboard/${userId}`);
                     if (response.data.success) {
                         backendName = response.data.userName || 'User';
-                        backendProfile = { ...response.data.userAnalysis, ...response.data.styleInsights, likedOutfits: response.data.likedOutfits || [] };
+                        const insights = response.data.styleInsights || {};
+                        backendProfile = { 
+                            ...response.data.userAnalysis, 
+                            ...insights, 
+                            season: insights.colorSeason || response.data.userAnalysis?.colorSeason || 'Unknown',
+                            bestColors: [...(insights.bestNeutrals || []), ...(insights.bestAccentColors || [])],
+                            likedOutfits: response.data.likedOutfits || [] 
+                        };
                         backendOotd = response.data.outfitOfTheDay;
                         backendRecs = response.data.recommendedOutfits;
                         setStylingHistory(response.data.stylingHistory || []);
@@ -129,7 +144,7 @@ export default function DashboardScreen({ navigation, route }) {
                         undertone: saved.undertone || backendProfile?.undertone || 'Unknown',
                         faceShape: saved.faceShape || backendProfile?.faceShape,
                         bodyShape: saved.bodyShape || backendProfile?.bodyShape,
-                        bestColors: saved.bestNeutrals ? saved.bestNeutrals.map(c => typeof c === 'string' ? c : (c.hex || c.value || c.color)) : backendProfile?.bestColors,
+                        bestColors: saved.bestNeutrals ? [...(saved.bestNeutrals || []), ...(saved.bestAccentColors || [])].map(c => typeof c === 'string' ? c : (c.hex || c.value || c.color)) : [...(backendProfile?.bestNeutrals || []), ...(backendProfile?.bestAccentColors || [])],
                         avoidColors: saved.avoidColors ? saved.avoidColors.map(c => typeof c === 'string' ? c : (c.hex || c.value || c.color)) : backendProfile?.avoidColors,
                         jewelry: saved.jewelry || backendProfile?.jewelry,
                     };
@@ -168,25 +183,25 @@ export default function DashboardScreen({ navigation, route }) {
 
     if (loading) {
         return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#25344F" />
-                <Text style={styles.loadingText}>Curating your look...</Text>
+            <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
+                <ActivityIndicator size="large" color={theme.accent} />
+                <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Curating your look...</Text>
             </View>
         );
     }
 
     return (
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
             {/* 1. Welcome Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                    <Ionicons name="menu-outline" size={28} color="#25344F" />
+                    <Ionicons name="menu-outline" size={28} color={theme.text} />
                 </TouchableOpacity>
                 <View style={styles.headerTitleContainer}>
-                    <Text style={styles.greeting}>Welcome back, {profile?.name || 'User'}</Text>
-                    <Text style={styles.tagline}>Your AI stylist is ready.</Text>
+                    <Text style={[styles.greeting, { color: theme.text }]}>Welcome back, {profile?.name || 'User'}</Text>
+                    <Text style={[styles.tagline, { color: theme.textSecondary }]}>Your AI stylist is ready.</Text>
                 </View>
-                <TouchableOpacity style={styles.profileAvatar}>
+                <TouchableOpacity style={[styles.profileAvatar, { backgroundColor: isDark ? theme.accent : '#C6A57A' }]}>
                     <Text style={styles.avatarText}>{profile?.name ? profile.name[0] : 'U'}</Text>
                 </TouchableOpacity>
             </View>
@@ -219,7 +234,7 @@ export default function DashboardScreen({ navigation, route }) {
                                             <Image 
                                                 source={{ uri: ootd.top.imageUrl.startsWith('http') ? ootd.top.imageUrl : `${API_BASE_URL}${ootd.top.imageUrl}` }} 
                                                 style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }} 
-                                                resizeMode="cover"
+                                                resizeMode="contain"
                                             />
                                         </TouchableOpacity>
                                         <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.top.type}</Text>
@@ -230,7 +245,7 @@ export default function DashboardScreen({ navigation, route }) {
                                             <Image 
                                                 source={{ uri: ootd.bottom.imageUrl.startsWith('http') ? ootd.bottom.imageUrl : `${API_BASE_URL}${ootd.bottom.imageUrl}` }} 
                                                 style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }} 
-                                                resizeMode="cover"
+                                                resizeMode="contain"
                                             />
                                         </TouchableOpacity>
                                         <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.bottom.type}</Text>
@@ -253,7 +268,7 @@ export default function DashboardScreen({ navigation, route }) {
                                     <Image 
                                         source={{ uri: ootd.imageUrl.startsWith('http') ? ootd.imageUrl : `${API_BASE_URL}${ootd.imageUrl}` }} 
                                         style={{ width: '100%', height: 200, borderRadius: 12, marginBottom: 12, backgroundColor: '#fff' }} 
-                                        resizeMode="cover"
+                                        resizeMode="contain"
                                     />
                                 </TouchableOpacity>
                                 ) : null}
@@ -301,7 +316,7 @@ export default function DashboardScreen({ navigation, route }) {
                         <View key={rec._id || rec.id || idx.toString()} style={styles.recCard}>
                             {rec.imageUrl ? (
                                 <TouchableOpacity onPress={() => handleOpenModal(rec)}>
-                                    <Image source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }} style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 12 }} />
+                                    <Image source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }} style={{ width: '100%', height: 150, borderRadius: 8, marginBottom: 12, backgroundColor: '#fff' }} resizeMode="contain" />
                                 </TouchableOpacity>
                             ) : null}
                             <Text style={styles.recTitle}>{rec.type || 'Outfit'}</Text>

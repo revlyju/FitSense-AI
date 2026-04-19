@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function GenerateOutfitScreen({ navigation }) {
-    const [imageUri, setImageUri] = useState(null); // Local state for demo purposes
+    const { theme, isDark } = useTheme();
+    const [imageUri, setImageUri] = useState(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [showResults, setShowResults] = useState(false);
 
     const handleGenerate = () => {
         setIsGenerating(true);
-        // Simulate an API call delay
         setTimeout(() => {
             setIsGenerating(false);
             setShowResults(true);
@@ -22,12 +23,12 @@ export default function GenerateOutfitScreen({ navigation }) {
     };
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                    <Ionicons name="menu-outline" size={28} color="#25344F" />
+                    <Ionicons name="menu-outline" size={28} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Generate Outfit</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>Generate Outfit</Text>
             </View>
             
             <ScrollView contentContainerStyle={styles.scrollContent}>

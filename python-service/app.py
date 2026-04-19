@@ -1,180 +1,224 @@
-from fastapi import FastAPI, File, UploadFile
+"""
+Face analysis microservice (FastAPI).
+
+Uses MediaPipe **Tasks** Face Landmarker (not legacy `mp.solutions`), because
+newer mediapipe wheels expose `tasks` only and no longer ship `mp.solutions`.
+"""
+
+import base64
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
+
 import cv2
-import numpy as np
 import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
+import numpy as np
+from fastapi import FastAPI, File, UploadFile
+from mediapipe.tasks.python.core import base_options
+from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
 
-app = FastAPI()
+MODEL_PATH = Path(__file__).resolve().parent / "face_landmarker.task"
 
-# Initialize Face Landmarker locally
-base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
-options = vision.FaceLandmarkerOptions(base_options=base_options,
-                                       output_face_blendshapes=False,
-                                       output_facial_transformation_matrixes=False,
-                                       min_face_detection_confidence=0.5,
-                                       min_face_presence_confidence=0.5,
-                                       min_tracking_confidence=0.5,
-                                       num_faces=1)
-detector = vision.FaceLandmarker.create_from_options(options)
+_face_landmarker: Optional[FaceLandmarker] = None
 
-def detect_face_shape(landmarks, image_shape):
-    h, w, _ = image_shape
 
-    # Convert normalized landmarks to pixel coordinates
-    points = [(int(l.x * w), int(l.y * h)) for l in landmarks]
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _face_landmarker
+    if not MODEL_PATH.is_file():
+        raise FileNotFoundError(
+            f"Missing face landmarker model at {MODEL_PATH}. "
+            "Add face_landmarker.task next to app.py (see MediaPipe face landmarker bundle)."
+        )
 
-    # Simple heuristic ratios using landmarks (234, 454) for width, (10, 152) for height
-    jaw_width = abs(points[234][0] - points[454][0])
-    face_height = abs(points[10][1] - points[152][1])
+    options = FaceLandmarkerOptions(
+        base_options=base_options.BaseOptions(model_asset_path=str(MODEL_PATH)),
+        running_mode=RunningMode.IMAGE,
+        num_faces=1,
+        min_face_detection_confidence=0.5,
+        min_face_presence_confidence=0.5,
+        output_face_blendshapes=False,
+        output_facial_transformation_matrixes=False,
+    )
+    _face_landmarker = FaceLandmarker.create_from_options(options)
+    try:
+        yield
+    finally:
+        if _face_landmarker is not None:
+            _face_landmarker.close()
+            _face_landmarker = None
 
-    raw_ratio = face_height / jaw_width if jaw_width != 0 else 1
-    # Round to prevent microscopic visual shifts causing wildly different shape text results
-    ratio = round(raw_ratio, 2)
 
-    if ratio > 1.45:
-        return "Oval"
-    elif ratio > 1.25:
-        return "Round"
-    elif ratio > 1.15:
-        return "Heart"
-    elif ratio >= 1.05:
-        return "Square"
-    else:
-        return "Balanced"
+app = FastAPI(lifespan=lifespan)
 
-def detect_contrast(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    std_dev = np.std(gray)
 
-    if std_dev < 40:
-        return "Low"
-    elif std_dev < 80:
-        return "Medium"
-    else:
-        return "High"
+def get_pixel_landmarks(image_rgb: np.ndarray, x_offset: int = 0, y_offset: int = 0):
+    if _face_landmarker is None:
+        return None
+
+    h, w, _ = image_rgb.shape
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
+    result = _face_landmarker.detect(mp_image)
+
+    if not result.face_landmarks:
+        return None
+
+    landmarks = result.face_landmarks[0]
+    points = []
+    for lm in landmarks:
+        px_x = int(lm.x * w) + x_offset
+        px_y = int(lm.y * h) + y_offset
+        points.append((px_x, px_y))
+
+    return points
+
+
+def detect_face_shape(points):
+    if not points or len(points) < 455:
+        return "Unknown"
+
+    try:
+        jaw_width = abs(points[234][0] - points[454][0])
+        face_length = abs(points[10][1] - points[152][1])
+
+        if face_length == 0:
+            return "Unknown"
+
+        ratio = round(jaw_width / face_length, 2)
+
+        if ratio > 0.78:
+            return "Round"
+        elif ratio < 0.72:
+            return "Oval"
+        else:
+            return "Balanced"
+
+    except Exception:
+        return "Unknown"
+
+
+def detect_contrast(image_bgr, points=None):
+    try:
+        if image_bgr is None or image_bgr.size == 0:
+            return "Unknown"
+
+        target_img = image_bgr
+
+        if points:
+            x_coords = [p[0] for p in points]
+            y_coords = [p[1] for p in points]
+
+            h, w, _ = image_bgr.shape
+
+            x1 = max(0, min(x_coords))
+            y1 = max(0, min(y_coords))
+            x2 = min(w, max(x_coords))
+            y2 = min(h, max(y_coords))
+
+            if x2 > x1 and y2 > y1:
+                target_img = image_bgr[y1:y2, x1:x2]
+
+        if target_img is None or target_img.size == 0:
+            target_img = image_bgr
+
+        gray = cv2.cvtColor(target_img, cv2.COLOR_BGR2GRAY)
+        std_dev = np.std(gray)
+
+        if std_dev < 40:
+            return "Low"
+        elif std_dev < 80:
+            return "Medium"
+        else:
+            return "High"
+
+    except Exception:
+        return "Unknown"
+
 
 @app.post("/analyze-face")
 async def analyze_face(file: UploadFile = File(...)):
-    contents = await file.read()
-    nparr = np.frombuffer(contents, np.uint8)
-    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-    if image is None:
-        return {
-            "faceShape": "Unknown",
-            "contrastLevel": "Unknown"
-        }
-
-    # Normalize incoming image processing to ensure FaceMesh acts deterministically on consistent dimensions
     try:
-        image = cv2.resize(image, (512, 512))
-    except Exception as e:
-        pass
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    
-    # 3-Attempt Retry Block for Mediapipe stability
-    detection_result = None
-    for _ in range(3):
-        detection_result = detector.detect(mp_image)
-        if detection_result and detection_result.face_landmarks:
-            break
-
-    if not detection_result or not detection_result.face_landmarks:
-        # Fallback to OpenCV Haar Cascades
-        cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        face_cascade = cv2.CascadeClassifier(cascade_path)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        
-        fallback_censored = image.copy()
-        import base64
-        
-        if len(faces) == 0:
-            # Absolute fallback if neither can find a face
-            _, buffer = cv2.imencode('.jpg', fallback_censored)
-            uncensored_b64 = base64.b64encode(buffer).decode('utf-8')
+        if image_bgr is None:
             return {
                 "faceShape": "Unknown",
-                "contrastLevel": detect_contrast(image),
-                "censoredImage": uncensored_b64
+                "contrastLevel": "Unknown",
+                "censoredImage": None,
             }
-        
-        # Use the first face found by OpenCV
-        (x, y, w_face, h_face) = faces[0]
-        
-        # Add 10% padding
-        pad_x = int(w_face * 0.1)
-        pad_y = int(h_face * 0.1)
-        h, w, _ = image.shape
-        cx1 = max(0, x - pad_x)
-        cx2 = min(w, x + w_face + pad_x)
-        cy1 = max(0, y - pad_y)
-        cy2 = min(h, y + h_face + pad_y)
-        
-        # Crop to calculate contrast
-        face_crop = image[cy1:cy2, cx1:cx2]
-        contrast = detect_contrast(face_crop) if face_crop.size > 0 else detect_contrast(image)
-        
-        cv2.rectangle(fallback_censored, (cx1, cy1), (cx2, cy2), (0, 0, 0), -1)
-        _, buffer = cv2.imencode('.jpg', fallback_censored)
-        censored_b64 = base64.b64encode(buffer).decode('utf-8')
-        
+
+        h, w, _ = image_bgr.shape
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+
+        # Focus crop (fallback only)
+        fx1, fx2 = int(w * 0.2), int(w * 0.8)
+        fy1, fy2 = int(h * 0.1), int(h * 0.9)
+
+        focused_rgb = image_rgb[fy1:fy2, fx1:fx2] if fy2 > fy1 and fx2 > fx1 else None
+
+        points = None
+
+        for i in range(3):
+            if i == 0:
+                points = get_pixel_landmarks(image_rgb)
+            elif i == 1 and focused_rgb is not None:
+                points = get_pixel_landmarks(focused_rgb, x_offset=fx1, y_offset=fy1)
+            else:
+                points = get_pixel_landmarks(image_rgb)
+
+            if points:
+                break
+
+        if not points:
+            _, buffer = cv2.imencode(".jpg", image_bgr)
+            return {
+                "faceShape": "Unknown",
+                "contrastLevel": "Unknown",
+                "censoredImage": base64.b64encode(buffer).decode("utf-8"),
+            }
+
+        face_shape = detect_face_shape(points)
+        contrast = detect_contrast(image_bgr, points)
+
+        x_coords = [p[0] for p in points]
+        y_coords = [p[1] for p in points]
+
+        bx1, by1 = max(0, min(x_coords)), max(0, min(y_coords))
+        bx2, by2 = min(w, max(x_coords)), min(h, max(y_coords))
+
+        pad_x = int((bx2 - bx1) * 0.1)
+        pad_y = int((by2 - by1) * 0.1)
+
+        cx1 = max(0, bx1 - pad_x)
+        cy1 = max(0, by1 - pad_y)
+        cx2 = min(w, bx2 + pad_x)
+        cy2 = min(h, by2 + pad_y)
+
+        censored_image = image_bgr.copy()
+
+        if cx2 > cx1 and cy2 > cy1:
+            cv2.rectangle(censored_image, (cx1, cy1), (cx2, cy2), (0, 0, 0), -1)
+
+        _, buffer = cv2.imencode(".jpg", censored_image)
+
         return {
-            "faceShape": "Unknown", # OpenCV Haar can't determine face shape reliably
+            "faceShape": face_shape,
             "contrastLevel": contrast,
-            "censoredImage": censored_b64
+            "censoredImage": base64.b64encode(buffer).decode("utf-8"),
         }
 
-    landmarks = detection_result.face_landmarks[0]
-    
-    # Determine crop boundaries from landmarks
-    x_min = min(l.x for l in landmarks)
-    x_max = max(l.x for l in landmarks)
-    y_min = min(l.y for l in landmarks)
-    y_max = max(l.y for l in landmarks)
-    
-    h, w, _ = image.shape
-    x1, y1 = max(0, int(x_min * w)), max(0, int(y_min * h))
-    x2, y2 = min(w, int(x_max * w)), min(h, int(y_max * h))
-    
-    face_shape = detect_face_shape(landmarks, image.shape)
-    
-    # Extract the cropped face region
-    face_crop = image[y1:y2, x1:x2]
-    
-    # Calculate contrast on cropped face if valid, else fallback to full image
-    if face_crop.size > 0:
-        contrast = detect_contrast(face_crop)
-    else:
-        contrast = detect_contrast(image)
+    except Exception as e:
+        print(f"PIPELINE ERROR: {str(e)}")
+        return {
+            "faceShape": "Unknown",
+            "contrastLevel": "Unknown",
+            "censoredImage": None,
+        }
 
-    # Censor the face in the original image for privacy
-    censored_image = image.copy()
-    
-    # Add 10% padding to the bounding box to ensure the whole face is covered
-    pad_x = int((x2 - x1) * 0.1)
-    pad_y = int((y2 - y1) * 0.1)
-    cx1 = max(0, x1 - pad_x)
-    cx2 = min(w, x2 + pad_x)
-    cy1 = max(0, y1 - pad_y)
-    cy2 = min(h, y2 + pad_y)
-    
-    # Fill with black rectangle
-    cv2.rectangle(censored_image, (cx1, cy1), (cx2, cy2), (0, 0, 0), -1)
-    
-    # Encode back to base64
-    import base64
-    _, buffer = cv2.imencode('.jpg', censored_image)
-    censored_b64 = base64.b64encode(buffer).decode('utf-8')
-
-    return {
-        "faceShape": face_shape,
-        "contrastLevel": contrast,
-        "censoredImage": censored_b64
-    }
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

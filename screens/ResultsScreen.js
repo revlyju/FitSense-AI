@@ -270,18 +270,6 @@ const ResultsScreen = ({ navigation, route }) => {
         </View>
       )}
 
-      <View style={styles.outfitsSection}>
-        <Text style={styles.sectionTitle}>Recommended Outfits (Stylist Tips)</Text>
-        <FlatList
-          data={analysisResults.outfits}
-          keyExtractor={(item, index) => item.id || index.toString()}
-          scrollEnabled={false}
-          renderItem={({ item, index }) => (
-            <OutfitCard index={index} outfit={item} onBuyPress={() => handleBuyNow(item.link || 'https://example.com/shop')} />
-          )}
-        />
-      </View>
-
       {analysisResults.dbOutfits && analysisResults.dbOutfits.length > 0 && (
         <View style={styles.outfitsSection}>
           <Text style={styles.sectionTitle}>Shop Recommended Outfits</Text>
@@ -295,6 +283,18 @@ const ResultsScreen = ({ navigation, route }) => {
           />
         </View>
       )}
+
+      <View style={styles.outfitsSection}>
+        <Text style={styles.sectionTitle}>Recommended Outfits (Stylist Tips)</Text>
+        <FlatList
+          data={analysisResults.outfits}
+          keyExtractor={(item, index) => item.id || index.toString()}
+          scrollEnabled={false}
+          renderItem={({ item, index }) => (
+            <OutfitCard index={index} outfit={item} onBuyPress={() => handleBuyNow(item.link || 'https://example.com/shop')} />
+          )}
+        />
+      </View>
 
       <View style={styles.actionSection}>
         <TouchableOpacity style={styles.actionButton} onPress={handleSaveLook}>

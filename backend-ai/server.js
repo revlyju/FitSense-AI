@@ -9,6 +9,8 @@ const bcrypt = require("bcryptjs");
 const path = require("path");
 const fs = require("fs");
 const FormData = require("form-data");
+const Groq = require("groq-sdk");
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 // Force Node.js to use Google's DNS servers for resolving the MongoDB SRV record
 // This fixes network issues where local ISPs block Node.js DNS queries.
 try {
@@ -79,6 +81,30 @@ const userSchema = new mongoose.Schema({
     likedCategories: [String],
     likedStyles: [String],
     interactionCount: { type: Number, default: 0 }
+  },
+  settings: {
+    stylePreferences: {
+      styles: [String],
+      fitPreference: { type: String, default: "" },
+      colorComfort: { type: String, default: "" }
+    },
+    avoid: {
+      colors: [String],
+      patterns: [String],
+      fits: [String]
+    },
+    privacy: {
+      blurFace: { type: Boolean, default: true },
+      storeImages: { type: Boolean, default: false },
+      deleteAfterAnalysis: { type: Boolean, default: true }
+    },
+    notifications: {
+      ootd: { type: Boolean, default: true },
+      recommendations: { type: Boolean, default: true }
+    },
+    theme: {
+      mode: { type: String, default: "light" }
+    }
   },
   createdAt: { type: Date, default: Date.now },
 });
@@ -636,214 +662,527 @@ function getSmartRecommendations(dbOutfits, userProfile) {
   return topCandidates.slice(0, 10);
 }
 
-// Helper functions for OOTD
-function hasCommonStyle(a, b) {
-  if (!a || !b) return false;
-  return a.some(tag => b.includes(tag));
+// =============================================
+// OOTD ENGINE v2 — Score-Based Outfit Matching
+// =============================================
+
+// Shared normalizer
+function _norm(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.map(v => (v || "").toString().toLowerCase().trim()).filter(Boolean);
+  return [(val || "").toString().toLowerCase().trim()].filter(Boolean);
 }
 
-function isNeutral(colors) {
-  if (!colors) return false;
-  const neutrals = ["black", "white", "beige", "grey", "navy"];
-  return colors.some(c => neutrals.includes(c.toLowerCase()));
+function _intersects(arr1, arr2) {
+  return arr1.some(a => a && arr2.some(b => b && (a.includes(b) || b.includes(a))));
 }
 
-function hasColorContrast(a, b) {
-  if (!a || !b) return false;
-  return a.some(c1 => b.some(c2 => c1 !== c2));
+// --- Category classifiers ---
+
+function _isFull(catOrType) {
+  const c = (catOrType || "").toLowerCase().trim();
+  return (
+    c.includes("dress") || c.includes("jumpsuit") || c.includes("bodysuit") ||
+    c.includes("gown") || c.includes("saree") || c.includes("sari") ||
+    c.includes("lehenga") || c.includes("set") || c.includes("co-ord") ||
+    c.includes("coord") || c.includes("romper") || c.includes("overalls") ||
+    c.includes("full") || c.includes("suit") || c.includes("anarkali") ||
+    c.includes("kaftan") || c.includes("abaya") || c.includes("sherwani")
+  );
 }
 
-function sameColorFamily(a, b) {
-  if (!a || !b) return false;
-  return a.some(c => b.includes(c));
+function _isTop(catOrType) {
+  const c = (catOrType || "").toLowerCase().trim();
+  if (_isFull(catOrType)) return false;
+  return (
+    c.includes("top") || c.includes("shirt") || c.includes("blouse") ||
+    c.includes("sweater") || c.includes("jacket") || c.includes("hoodie") ||
+    c.includes("tank") || c.includes("vest") || c.includes("cardigan") ||
+    c.includes("tunic") || c.includes("kurti") || c.includes("kurta") ||
+    c.includes("tee") || c.includes("t-shirt") || c.includes("crop") ||
+    c.includes("polo") || c.includes("henley") || c.includes("sweatshirt") ||
+    c.includes("blazer") || c.includes("coat") || c.includes("peplum")
+  );
 }
+
+function _isBottom(catOrType) {
+  const c = (catOrType || "").toLowerCase().trim();
+  if (_isFull(catOrType) || _isTop(catOrType)) return false;
+  return (
+    c.includes("bottom") || c.includes("pant") || c.includes("jean") ||
+    c.includes("trouser") || c.includes("skirt") || c.includes("legging") ||
+    c.includes("jogger") || c.includes("palazzo") || c.includes("churidar") ||
+    c.includes("salwar") || c.includes("dhoti") || c.includes("cargo") ||
+    c.includes("chino") || c.includes("culottes") ||
+    (c.includes("short") && !c.includes("sleeve"))
+  );
+}
+
+function _classifyOutfit(outfit) {
+  const cat = (outfit.category || "").toLowerCase();
+  const typ = (outfit.type || "").toLowerCase();
+  if (_isFull(cat) || _isFull(typ)) return "full";
+  if (_isTop(cat) || _isTop(typ)) return "top";
+  if (_isBottom(cat) || _isBottom(typ)) return "bottom";
+  return "unknown";
+}
+
+// --- Gender filter ---
+
+function _matchesGender(outfit, userGender) {
+  const genders = _norm(outfit.gender);
+  if (genders.length === 0) return true; // missing → treat as unisex
+  if (genders.includes("unisex") || genders.includes("all")) return true;
+  if (!userGender) return false;
+  return genders.includes(userGender);
+}
+
+function _resolveGender(userProfile) {
+  const raw = _norm(userProfile.gender);
+  if (raw.some(g => ["men", "man", "male", "m"].includes(g))) return "men";
+  if (raw.some(g => ["women", "woman", "female", "f"].includes(g))) return "women";
+  return "";
+}
+
+// --- Color compatibility ---
+
+function isColorCompatible(colors1, colors2) {
+  const c1 = _norm(colors1);
+  const c2 = _norm(colors2);
+  if (c1.length === 0 || c2.length === 0) return true; // no data → assume ok
+
+  const neutrals = ["black", "white", "beige", "grey", "gray", "navy", "cream", "ivory", "khaki", "taupe", "charcoal"];
+
+  // Rule 1: If either side has a neutral, it almost always works
+  if (c1.some(c => neutrals.includes(c)) || c2.some(c => neutrals.includes(c))) return true;
+
+  // Rule 2: Same color family is harmonious
+  if (c1.some(c => c2.includes(c))) return true;
+
+  // Rule 3: Curated complementary pairs
+  const goodPairs = [
+    ["blue", "burgundy"], ["blue", "white"], ["blue", "camel"],
+    ["grey", "pink"], ["grey", "yellow"], ["grey", "lavender"],
+    ["black", "gold"], ["black", "red"], ["black", "white"],
+    ["navy", "coral"], ["navy", "mustard"], ["navy", "blush"],
+    ["olive", "cream"], ["olive", "rust"], ["brown", "teal"],
+    ["maroon", "gold"], ["pink", "grey"], ["teal", "coral"],
+    ["white", "red"], ["beige", "brown"], ["rust", "cream"],
+    ["green", "beige"], ["lavender", "white"], ["mustard", "navy"],
+  ];
+
+  for (const [a, b] of goodPairs) {
+    if ((c1.some(c => c.includes(a)) && c2.some(c => c.includes(b))) ||
+        (c1.some(c => c.includes(b)) && c2.some(c => c.includes(a)))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// --- Length / proportion matching ---
+
+function isGoodLengthMatch(topOutfit, bottomOutfit) {
+  const tCat = (topOutfit.category || topOutfit.type || "").toLowerCase();
+  const bCat = (bottomOutfit.category || bottomOutfit.type || "").toLowerCase();
+  const tFit = (topOutfit.fit || "").toLowerCase();
+  const bFit = (bottomOutfit.fit || "").toLowerCase();
+
+  // Long top (kurti/tunic) with slim/fitted bottom is classic
+  const longTop = tCat.includes("kurti") || tCat.includes("kurta") || tCat.includes("tunic") || tCat.includes("long");
+  const slimBottom = bFit.includes("slim") || bFit.includes("fitted") || bCat.includes("legging") || bCat.includes("churidar") || bCat.includes("jean");
+
+  if (longTop && slimBottom) return true;
+
+  // Cropped / short top with high-waist bottom
+  const shortTop = tCat.includes("crop") || tFit.includes("cropped");
+  const highWaist = bCat.includes("high") || bCat.includes("palazzo") || bCat.includes("trouser");
+
+  if (shortTop && highWaist) return true;
+
+  // Tucked-in shirt scenario: fitted top + tailored bottom
+  if (tFit === "fitted" && (bCat.includes("trouser") || bCat.includes("skirt"))) return true;
+
+  return false;
+}
+
+// --- Hard incompatibility rules ---
+
+const INCOMPATIBLE_PAIRS = [
+  // [topPattern, bottomPattern] - if top category matches & bottom category matches → block
+  { top: "kurti", bottom: "mini skirt", reason: "Ethnic top with western mini skirt" },
+  { top: "kurta", bottom: "mini skirt", reason: "Ethnic top with western mini skirt" },
+  { top: "blazer", bottom: "jogger", reason: "Formal blazer with casual joggers" },
+  { top: "hoodie", bottom: "formal", reason: "Casual hoodie with formal bottom" },
+  { top: "kurti", bottom: "cargo", reason: "Ethnic top with utility cargo" },
+  { top: "kurta", bottom: "cargo", reason: "Ethnic top with utility cargo" },
+  { top: "crop", bottom: "dhoti", reason: "Western crop with ethnic dhoti" },
+  { top: "sherwani", bottom: "jean", reason: "Heavy ethnic with casual denim" },
+];
+
+function isIncompatible(topOutfit, bottomOutfit) {
+  const tCat = (topOutfit.category || topOutfit.type || "").toLowerCase();
+  const bCat = (bottomOutfit.category || bottomOutfit.type || "").toLowerCase();
+
+  for (const rule of INCOMPATIBLE_PAIRS) {
+    if (tCat.includes(rule.top) && bCat.includes(rule.bottom)) {
+      return rule.reason;
+    }
+  }
+  return null;
+}
+
+// --- Compatible category bonuses ---
+
+const GOOD_CATEGORY_PAIRS = [
+  { top: "kurti", bottoms: ["jean", "legging", "palazzo", "churidar", "salwar", "trouser"], bonus: 25 },
+  { top: "kurta", bottoms: ["jean", "legging", "palazzo", "churidar", "salwar", "chino"], bonus: 25 },
+  { top: "shirt", bottoms: ["jean", "trouser", "chino", "short", "skirt"], bonus: 20 },
+  { top: "blouse", bottoms: ["skirt", "trouser", "palazzo", "jean"], bonus: 20 },
+  { top: "t-shirt", bottoms: ["jean", "jogger", "short", "cargo", "chino"], bonus: 20 },
+  { top: "tee", bottoms: ["jean", "jogger", "short", "cargo", "chino"], bonus: 20 },
+  { top: "hoodie", bottoms: ["jean", "jogger", "cargo", "sweatpant"], bonus: 18 },
+  { top: "blazer", bottoms: ["trouser", "jean", "skirt", "chino"], bonus: 22 },
+  { top: "sweater", bottoms: ["jean", "trouser", "skirt", "legging"], bonus: 18 },
+  { top: "crop", bottoms: ["palazzo", "skirt", "jean", "trouser"], bonus: 18 },
+  { top: "tank", bottoms: ["jean", "short", "skirt", "palazzo"], bonus: 15 },
+  { top: "polo", bottoms: ["chino", "jean", "trouser", "short"], bonus: 18 },
+  { top: "peplum", bottoms: ["jean", "trouser", "skirt", "legging"], bonus: 18 },
+];
+
+function getCategoryBonus(topOutfit, bottomOutfit) {
+  const tCat = (topOutfit.category || topOutfit.type || "").toLowerCase();
+  const bCat = (bottomOutfit.category || bottomOutfit.type || "").toLowerCase();
+
+  for (const rule of GOOD_CATEGORY_PAIRS) {
+    if (tCat.includes(rule.top)) {
+      if (rule.bottoms.some(b => bCat.includes(b))) {
+        return rule.bonus;
+      }
+    }
+  }
+  return 0;
+}
+
+// --- Pattern balance ---
+
+function getPatternScore(topOutfit, bottomOutfit) {
+  const tPatterns = _norm(topOutfit.patterns);
+  const bPatterns = _norm(bottomOutfit.patterns);
+
+  const isSolid = (p) => p.length === 0 || p.includes("solid") || p.includes("plain");
+  const isPattern = (p) => !isSolid(p);
+
+  // Best: one solid + one pattern
+  if (isSolid(tPatterns) && isPattern(bPatterns)) return 10;
+  if (isPattern(tPatterns) && isSolid(bPatterns)) return 10;
+  // OK: both solid
+  if (isSolid(tPatterns) && isSolid(bPatterns)) return 5;
+  // Bad: both patterned (clashing)
+  if (isPattern(tPatterns) && isPattern(bPatterns)) return -10;
+
+  return 0;
+}
+
+// =============================================
+// MAIN: calculateOutfitScore
+// =============================================
+
+function calculateOutfitScore(topOutfit, bottomOutfit, userProfile) {
+  let score = 0;
+  let reasons = [];
+
+  const userOccasions = _norm(userProfile.occasion);
+  const userStyles = _norm(userProfile.stylePreference);
+  const userBodyShape = (userProfile.bodyShape || "").toLowerCase().trim();
+  const userFit = _norm(userProfile.fitPreference);
+
+  // --- RULE 0: HARD INCOMPATIBILITY (instant reject) ---
+  const blocked = isIncompatible(topOutfit, bottomOutfit);
+  if (blocked) {
+    return { score: -Infinity, reasons: [`Blocked: ${blocked}`] };
+  }
+
+  // --- RULE 1: CATEGORY COMPATIBILITY BONUS ---
+  const catBonus = getCategoryBonus(topOutfit, bottomOutfit);
+  if (catBonus > 0) {
+    score += catBonus;
+    reasons.push("Great category pairing");
+  }
+
+  // --- RULE 2: FIT / SILHOUETTE BALANCE ---
+  const tFit = (topOutfit.fit || "").toLowerCase();
+  const bFit = (bottomOutfit.fit || "").toLowerCase();
+
+  if (tFit && bFit && tFit !== bFit) {
+    score += 15;
+    reasons.push("Balanced silhouette");
+  } else if (tFit && bFit && tFit === bFit) {
+    // Same fit is okay for fitted+fitted, bad for loose+loose
+    if (tFit.includes("loose") || tFit.includes("oversized") || tFit.includes("relaxed")) {
+      score -= 10;
+    }
+  }
+
+  // Specific good combos
+  if ((tFit.includes("fitted") && bFit.includes("loose")) || (tFit.includes("loose") && bFit.includes("fitted"))) {
+    score += 10; // extra bonus for classic balance
+  }
+
+  // --- RULE 3: STYLE CONSISTENCY ---
+  const tStyles = _norm(topOutfit.style_tags);
+  const bStyles = _norm(bottomOutfit.style_tags);
+
+  if (tStyles.length > 0 && bStyles.length > 0) {
+    if (_intersects(tStyles, bStyles)) {
+      score += 20;
+      reasons.push("Consistent style");
+    } else {
+      score -= 15;
+    }
+  }
+
+  // --- RULE 4: OCCASION MATCH (HIGH PRIORITY) ---
+  const tOccs = _norm(topOutfit.occasion);
+  const bOccs = _norm(bottomOutfit.occasion);
+
+  if (userOccasions.length > 0) {
+    const topMatch = tOccs.length === 0 || _intersects(tOccs, userOccasions);
+    const bottomMatch = bOccs.length === 0 || _intersects(bOccs, userOccasions);
+
+    if (topMatch && bottomMatch) {
+      score += 30;
+      reasons.push("Perfect for your occasion");
+    } else if (topMatch || bottomMatch) {
+      score += 10;
+    } else {
+      score -= 30;
+    }
+  }
+
+  // --- RULE 5: COLOR COMPATIBILITY ---
+  if (isColorCompatible(topOutfit.colors, bottomOutfit.colors)) {
+    score += 20;
+    reasons.push("Harmonious colors");
+  } else {
+    score -= 15;
+  }
+
+  // --- RULE 6: PATTERN BALANCE ---
+  score += getPatternScore(topOutfit, bottomOutfit);
+
+  // --- RULE 7: LENGTH / PROPORTION ---
+  if (isGoodLengthMatch(topOutfit, bottomOutfit)) {
+    score += 10;
+    reasons.push("Great proportions");
+  }
+
+  // --- RULE 8: VERSATILE ITEMS BOOST ---
+  const bCat = (bottomOutfit.category || bottomOutfit.type || "").toLowerCase();
+  if (bCat.includes("jean") || bCat.includes("chino")) score += 10;
+
+  // --- RULE 9: BODY TYPE MATCH ---
+  if (userBodyShape) {
+    const tBody = _norm(topOutfit.suitable_body_types).concat(_norm(topOutfit.suitable_body_type));
+    const bBody = _norm(bottomOutfit.suitable_body_types).concat(_norm(bottomOutfit.suitable_body_type));
+    if (tBody.some(bt => userBodyShape.includes(bt) || bt.includes(userBodyShape))) score += 10;
+    if (bBody.some(bt => userBodyShape.includes(bt) || bt.includes(userBodyShape))) score += 10;
+  }
+
+  // --- RULE 10: FIT PREFERENCE MATCH ---
+  if (userFit.length > 0) {
+    if (tFit && userFit.some(f => tFit.includes(f))) score += 5;
+    if (bFit && userFit.some(f => bFit.includes(f))) score += 5;
+  }
+
+  return { score, reasons };
+}
+
+// =============================================
+// MAIN: generateOOTD
+// =============================================
 
 function generateOOTD(dbOutfits, userProfile) {
-  const normalize = (val) => {
-    if (!val) return [];
-    if (Array.isArray(val)) return val.map(v => (v || "").toString().toLowerCase().trim());
-    return [(val || "").toString().toLowerCase().trim()];
-  };
+  const userGender = _resolveGender(userProfile);
+  const userOccasions = _norm(userProfile.occasion);
+  const userStyles = _norm(userProfile.stylePreference);
 
-  const userGenderRaw = normalize(userProfile.gender);
-  const userGender =
-    userGenderRaw.some((g) => ["men", "man", "male", "m"].includes(g)) ? "men" :
-      userGenderRaw.some((g) => ["women", "woman", "female", "f"].includes(g)) ? "women" :
-        "";
-        
-  const userOccasions = normalize(userProfile.occasion);
-  const userStyles = normalize(userProfile.stylePreference);
-
-  // Extract History for Repetition Rule
+  // Extract recent history IDs for repetition control
   const recentHistory = userProfile.history || [];
   const recentOotdIds = recentHistory.flatMap(h => {
-      const matches = [];
-      if(h.analysisData && h.analysisData.dbOutfits) {
-          h.analysisData.dbOutfits.forEach(o => matches.push(o.id || o._id));
-      }
-      return matches;
+    const matches = [];
+    if (h.analysisData && h.analysisData.dbOutfits) {
+      h.analysisData.dbOutfits.forEach(o => matches.push(o.id || o._id));
+    }
+    return matches;
   }).map(id => (id || "").toString());
 
-  const intersects = (arr1, arr2) => arr1.some(a => a && arr2.some(b => b && (a.includes(b) || b.includes(a))));
+  // ==== STEP 1: CLASSIFY & SPLIT OUTFITS ====
+  const genderFiltered = dbOutfits.filter(o => _matchesGender(o, userGender));
 
-  const isTop = (cat) => {
-    const c = cat ? cat.toLowerCase().trim() : "";
-    return c.includes("top") || c.includes("shirt") || c.includes("blouse") || c.includes("sweater") || c.includes("jacket") || c.includes("hoodie");
-  };
-  const isBottom = (cat) => {
-    const c = cat ? cat.toLowerCase().trim() : "";
-    return c.includes("bottom") || c.includes("pant") || c.includes("jean") || c.includes("trouser") || c.includes("skirt") || c.includes("short");
-  };
-  const isFull = (cat) => {
-    const c = cat ? cat.toLowerCase().trim() : "";
-    return c.includes("dress") || c.includes("jumpsuit") || c.includes("bodysuit") || c.includes("gown") || c.includes("full");
-  };
+  const tops = [];
+  const bottoms = [];
+  const fullOutfits = [];
 
-  // STEP 1: SPLIT OUTFITS
-  let tops = dbOutfits.filter(o => {
-    const g = o?.gender;
-    const norm = normalize(g);
-    if (norm.length > 0 && !norm.includes("unisex") && !norm.includes("all")) { if (!userGender || !norm.includes(userGender)) return false; }
-    return isTop(o.category) || isTop(o.type);
-  });
+  for (const o of genderFiltered) {
+    const cls = _classifyOutfit(o);
+    if (cls === "top") tops.push(o);
+    else if (cls === "bottom") bottoms.push(o);
+    else if (cls === "full") fullOutfits.push(o);
+    // "unknown" items are skipped
+  }
 
-  let bottoms = dbOutfits.filter(o => {
-    const g = o?.gender;
-    const norm = normalize(g);
-    if (norm.length > 0 && !norm.includes("unisex") && !norm.includes("all")) { if (!userGender || !norm.includes(userGender)) return false; }
-    return isBottom(o.category) || isBottom(o.type);
-  });
+  console.log(`[OOTD v2] Gender: ${userGender} | Tops: ${tops.length} | Bottoms: ${bottoms.length} | Full: ${fullOutfits.length}`);
 
-  let fullOutfits = dbOutfits.filter(o => {
-    const g = o?.gender;
-    const norm = normalize(g);
-    if (norm.length > 0 && !norm.includes("unisex") && !norm.includes("all")) { if (!userGender || !norm.includes(userGender)) return false; }
-    const occs = normalize(o.occasion);
-    const occMatch = userOccasions.length === 0 || intersects(occs, userOccasions);
-    return occMatch && (isFull(o.category) || isFull(o.type));
-  });
+  // ==== STEP 2: SINGLE-PIECE PRIORITY (30% chance) ====
+  const shouldTryFull = fullOutfits.length > 0 && Math.random() < 0.3;
 
-  // STEP 2 & 3: FULL OUTFIT DECISION
-  const useFullOutfit = fullOutfits.length > 0 && Math.random() < 0.3;
-  if (useFullOutfit) {
+  function getBestFullOutfit() {
+    if (fullOutfits.length === 0) return null;
+
+    // Score full outfits using the existing recommendation scorer
     const scoredFull = getSmartRecommendations(fullOutfits, userProfile);
-    if (scoredFull.length > 0) {
-        return {
-           type: "full",
-           ...scoredFull[0] // Spread to cleanly expose .imageUrl for frontend fallback support
-        };
+    if (scoredFull.length === 0) return null;
+
+    // Apply repetition penalty and pick best
+    let best = null;
+    let bestRawScore = -Infinity;
+
+    for (const item of scoredFull) {
+      let rawScore = item.score;
+      if (recentOotdIds.includes((item.id || "").toString())) rawScore -= 3;
+      if (rawScore > bestRawScore) {
+        bestRawScore = rawScore;
+        best = item;
+      }
+    }
+
+    if (!best) return null;
+
+    return {
+      type: "full",
+      ...best,
+      matchReasons: best.matchReasons || "A stylish single-piece look curated for you.",
+    };
+  }
+
+  if (shouldTryFull) {
+    const fullResult = getBestFullOutfit();
+    if (fullResult) {
+      console.log(`[OOTD v2] Returning full outfit: ${fullResult.type} / ${fullResult.id}`);
+      return fullResult;
     }
   }
 
-  // STEP 4: STRICT OCCASION (With intelligent fallback if DB is mismatched)
-  let validTops = tops.filter(o => userOccasions.length === 0 || intersects(normalize(o.occasion), userOccasions));
-  let validBottoms = bottoms.filter(o => userOccasions.length === 0 || intersects(normalize(o.occasion), userOccasions));
+  // ==== STEP 3: TOP + BOTTOM COMBO ====
 
-  // Fallback: If 0 tops perfectly match the occasion, relax Occasion and rely purely on the User Style subsets
-  if (validTops.length === 0) validTops = tops;
-  if (validBottoms.length === 0) validBottoms = bottoms;
+  // Pre-filter by occasion (with fallback)
+  let candidateTops = tops.filter(o => userOccasions.length === 0 || _intersects(_norm(o.occasion), userOccasions));
+  let candidateBottoms = bottoms.filter(o => userOccasions.length === 0 || _intersects(_norm(o.occasion), userOccasions));
 
-  // STEP 5: STYLE FILTER (SOFT)
-  const styledTops = validTops.filter(o => intersects(normalize(o.style_tags), userStyles));
-  const styledBottoms = validBottoms.filter(o => intersects(normalize(o.style_tags), userStyles));
+  if (candidateTops.length === 0) candidateTops = tops;
+  if (candidateBottoms.length === 0) candidateBottoms = bottoms;
 
-  // STEP 6: SCORE ITEMS
-  const scoredTops = getSmartRecommendations(styledTops.length ? styledTops : validTops, userProfile).slice(0, 5);
-  const scoredBottoms = getSmartRecommendations(styledBottoms.length ? styledBottoms : validBottoms, userProfile).slice(0, 5);
+  // Soft style filter — prefer matching styles but don't hard-require
+  const styledTops = candidateTops.filter(o => _intersects(_norm(o.style_tags), userStyles));
+  const styledBottoms = candidateBottoms.filter(o => _intersects(_norm(o.style_tags), userStyles));
 
-  console.log(`[generateOOTD] Scored tops: ${scoredTops.length}, Scored bottoms: ${scoredBottoms.length}`);
+  const finalTops = styledTops.length >= 2 ? styledTops : candidateTops;
+  const finalBottoms = styledBottoms.length >= 2 ? styledBottoms : candidateBottoms;
 
-  // STEP 7 & 8: COMBINATION LOGIC
+  // Score individual items to get top candidates (max 8 each to keep O(n²) manageable)
+  const scoredTops = getSmartRecommendations(finalTops, userProfile).slice(0, 8);
+  const scoredBottoms = getSmartRecommendations(finalBottoms, userProfile).slice(0, 8);
+
+  console.log(`[OOTD v2] Candidate tops: ${scoredTops.length}, Candidate bottoms: ${scoredBottoms.length}`);
+
+  if (scoredTops.length === 0 || scoredBottoms.length === 0) {
+    // Can't make a combo — try full outfit
+    const fallbackFull = getBestFullOutfit();
+    if (fallbackFull) return fallbackFull;
+
+    // Absolute fallback
+    const anyRec = getSmartRecommendations(dbOutfits, userProfile)[0] || null;
+    return anyRec;
+  }
+
+  // ==== STEP 4: SCORE ALL TOP×BOTTOM COMBINATIONS ====
+
   let bestCombo = null;
   let bestScore = -Infinity;
+  let bestReasons = [];
 
-  for (let top of scoredTops) {
-    for (let bottom of scoredBottoms) {
-      const rawTop = dbOutfits.find(o => (o._id || o.id).toString() === top.id.toString()) || {};
-      const rawBottom = dbOutfits.find(o => (o._id || o.id).toString() === bottom.id.toString()) || {};
+  for (const topItem of scoredTops) {
+    // Look up the raw outfit data for scoring
+    const rawTop = genderFiltered.find(o => (o._id || o.id).toString() === topItem.id.toString()) || {};
 
-      let score = top.score + bottom.score;
-      
-      const tOccasions = normalize(rawTop.occasion);
-      const bOccasions = normalize(rawBottom.occasion);
-      const tStyles = normalize(rawTop.style_tags);
-      const bStyles = normalize(rawBottom.style_tags);
-      const tColors = normalize(rawTop.colors);
-      const bColors = normalize(rawBottom.colors);
-      const tFit = normalize(rawTop.fit)[0] || "";
-      const bFit = normalize(rawBottom.fit)[0] || "";
-      const tBody = normalize(rawTop.suitable_body_types);
-      const bBody = normalize(rawBottom.suitable_body_types);
+    for (const bottomItem of scoredBottoms) {
+      const rawBottom = genderFiltered.find(o => (o._id || o.id).toString() === bottomItem.id.toString()) || {};
 
-      // RULE 1: SILHOUETTE BALANCE
-      if (tFit === "fitted" && bFit === "loose") score += 25;
-      if (tFit === "loose" && bFit === "fitted") score += 25;
-      if (tFit === "loose" && bFit === "loose") score -= 15;
+      // Calculate pair score
+      const { score: pairScore, reasons } = calculateOutfitScore(rawTop, rawBottom, userProfile);
 
-      // RULE 2: COLOR HARMONY
-      if (isNeutral(tColors) || isNeutral(bColors)) score += 20;
-      if (hasColorContrast(tColors, bColors)) score += 15;
-      if (sameColorFamily(tColors, bColors)) score += 10;
+      if (pairScore === -Infinity) continue; // Hard blocked
 
-      // RULE 3: STYLE CONSISTENCY
-      if (hasCommonStyle(tStyles, bStyles)) {
-          score += 20;
-      } else {
-          score -= 10;
-      }
+      // Total score = individual item relevance + pair compatibility
+      let totalScore = pairScore;
 
-      // RULE 4: BODY TYPE MATCH
-      const uBodyType = (userProfile.bodyShape || "").toLowerCase();
-      if (uBodyType) {
-          if (tBody.includes(uBodyType)) score += 10;
-          if (bBody.includes(uBodyType)) score += 10;
-      }
+      // Repetition control
+      if (recentOotdIds.includes((topItem.id || "").toString())) totalScore -= 20;
+      if (recentOotdIds.includes((bottomItem.id || "").toString())) totalScore -= 25;
 
-      // RULE 5: UNIVERSAL ITEMS BOOST
-      if (rawBottom.isUniversal === true || rawBottom.isUniversal === "true") score += 12;
-
-      // RULE 6: REPETITION CONTROL
-      if (recentOotdIds.includes((bottom.id||"").toString())) score -= 25;
-      if (recentOotdIds.includes((top.id||"").toString())) score -= 20;
-
-      // RULE 7: HARD PENALTY (Occasion)
-      if (userOccasions.length > 0) {
-          if (!intersects(tOccasions, userOccasions)) score -= 50;
-          if (!intersects(bOccasions, userOccasions)) score -= 50;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        let displayScore = Math.min(10, Math.round((Math.max(1, score) / 100) * 10)); 
-        if(score > 100) displayScore = 10;
-
-        bestCombo = { 
-          top, 
-          bottom, 
-          score: displayScore,
-          matchReasons: "Professionally curated style balancing your " + (userOccasions[0]||"occasion") + " preference and body shape."
-        };
+      if (totalScore > bestScore) {
+        bestScore = totalScore;
+        bestReasons = reasons;
+        bestCombo = { top: topItem, bottom: bottomItem };
       }
     }
   }
 
-  if (bestCombo) {
-     return {
-        type: "combo",
-        ...bestCombo
-     };
-  } else if (tops.length > 0 && bottoms.length > 0) {
-      console.log(`[generateOOTD] Fallback combo selection.`);
-      return { 
-          type: "combo",
-          top: tops[0], 
-          bottom: bottoms[0], 
-          score: 7,
-          matchReasons: "AI curated smart pair based off available wardrobe matches."
-      };
+  // ==== STEP 5: THRESHOLD CHECK ====
+  const COMBO_THRESHOLD = 20;
+
+  if (bestCombo && bestScore >= COMBO_THRESHOLD) {
+    // Normalize display score to 1-10
+    let displayScore = Math.min(10, Math.max(6, Math.round((Math.max(0, bestScore) / 120) * 10)));
+    if (bestScore > 100) displayScore = 10;
+
+    const reasonText = bestReasons.length > 0
+      ? bestReasons.slice(0, 3).join(", ") + "."
+      : `Professionally curated for your ${userOccasions[0] || "style"} preference.`;
+
+    console.log(`[OOTD v2] Returning combo (score: ${bestScore}): ${reasonText}`);
+
+    return {
+      type: "combo",
+      top: bestCombo.top,
+      bottom: bestCombo.bottom,
+      score: displayScore,
+      matchReasons: reasonText.charAt(0).toUpperCase() + reasonText.slice(1),
+    };
   }
 
-  // Final edge case fallback if fully empty
+  // ==== STEP 6: FALLBACK — score too low, try full outfit instead ====
+  console.log(`[OOTD v2] Combo score (${bestScore}) below threshold (${COMBO_THRESHOLD}). Falling back to full outfit.`);
+
+  const fallbackFull = getBestFullOutfit();
+  if (fallbackFull) return fallbackFull;
+
+  // If still no full outfit, return best combo anyway (better than nothing)
+  if (bestCombo) {
+    let displayScore = Math.min(10, Math.max(6, Math.round((Math.max(0, bestScore) / 80) * 10)));
+    return {
+      type: "combo",
+      top: bestCombo.top,
+      bottom: bestCombo.bottom,
+      score: displayScore,
+      matchReasons: "AI curated smart pair based on available wardrobe matches.",
+    };
+  }
+
+  // Absolute final fallback
+  console.log(`[OOTD v2] Absolute fallback — returning top recommendation.`);
   return getSmartRecommendations(dbOutfits, userProfile)[0] || null;
 }
 
@@ -1493,10 +1832,123 @@ app.post("/virtual-tryon", async (req, res) => {
   }
 });
 
+// ==== SETTINGS ROUTES ====
+
+// GET /user/settings/:userId - Fetch user settings with defaults
+app.get("/user/settings/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Valid userId is required" });
+    }
+
+    const user = await User.findById(userId).lean();
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Return settings with safe defaults
+    const defaults = {
+      stylePreferences: { styles: [], fitPreference: "", colorComfort: "" },
+      avoid: { colors: [], patterns: [], fits: [] },
+      privacy: { blurFace: true, storeImages: false, deleteAfterAnalysis: true },
+      notifications: { ootd: true, recommendations: true },
+      theme: { mode: "light" }
+    };
+
+    const settings = user.settings || {};
+    const merged = {
+      stylePreferences: { ...defaults.stylePreferences, ...settings.stylePreferences },
+      avoid: { ...defaults.avoid, ...settings.avoid },
+      privacy: { ...defaults.privacy, ...settings.privacy },
+      notifications: { ...defaults.notifications, ...settings.notifications },
+      theme: { ...defaults.theme, ...settings.theme }
+    };
+
+    return res.json({
+      success: true,
+      settings: merged,
+      profile: { name: user.name, email: user.email }
+    });
+  } catch (err) {
+    console.error("Get settings error:", err);
+    return res.status(500).json({ error: "Failed to fetch settings" });
+  }
+});
+
+// PUT /user/settings - Deep merge update settings
+app.put("/user/settings", async (req, res) => {
+  try {
+    const { userId, settings } = req.body || {};
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Valid userId is required" });
+    }
+    if (!settings || typeof settings !== "object") {
+      return res.status(400).json({ error: "Settings object is required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Build dot-notation $set object for deep merge
+    const setObj = {};
+    for (const section of Object.keys(settings)) {
+      if (typeof settings[section] === "object" && settings[section] !== null) {
+        for (const field of Object.keys(settings[section])) {
+          setObj[`settings.${section}.${field}`] = settings[section][field];
+        }
+      }
+    }
+
+    if (Object.keys(setObj).length === 0) {
+      return res.status(400).json({ error: "No valid settings fields to update" });
+    }
+
+    await User.updateOne({ _id: userId }, { $set: setObj });
+
+    // Fetch updated settings for response
+    const updated = await User.findById(userId).lean();
+    return res.json({ success: true, settings: updated.settings });
+  } catch (err) {
+    console.error("Update settings error:", err);
+    return res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
 const PORT = 5000;
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+});
+
+// AI Chatbot endpoint
+app.post("/api/chat", async (req, res) => {
+  const { messages, userId } = req.body;
+  
+  try {
+    let userContext = "";
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+       const user = await User.findById(userId);
+       if (user) {
+          userContext = `\n\nUser Context:\nGender: ${user.gender}\nSeason: ${user.analysis?.colorSeason}\nUndertone: ${user.analysis?.undertone}\nBody Shape: ${user.analysis?.bodyShape}`;
+       }
+    }
+
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        { 
+          role: "system", 
+          content: `You are the AI Stylist assistant. Help users with fashion, style advice, and outfit recommendations based on their analysis.${userContext}\n\nKeep advice concise and encouraging.` 
+        },
+        ...messages
+      ],
+      model: "llama-3.3-70b-versatile",
+    });
+
+    res.json({ content: chatCompletion.choices[0].message.content });
+  } catch (error) {
+    console.error("Groq Chat Error:", error);
+    res.status(500).json({ error: "Failed to get response from Groq" });
+  }
 });
 
 process.on("uncaughtException", (err) => {

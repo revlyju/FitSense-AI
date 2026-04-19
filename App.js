@@ -17,11 +17,14 @@ import PreferencesScreen from './screens/PreferencesScreen';
 import UploadScreen from './screens/UploadScreen';
 import HistoryDetailScreen from './screens/HistoryDetailScreen';
 
+import { ThemeProvider } from './contexts/ThemeContext';
+
 const Stack = createNativeStackNavigator();
 
 export default function App() {
   return (
     <GestureHandlerRootView style={styles.container}>
+      <ThemeProvider>
       <NavigationContainer>
         <Stack.Navigator
           initialRouteName="Auth"
@@ -45,6 +48,7 @@ export default function App() {
 
         <StatusBar style="dark" />
       </NavigationContainer>
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }

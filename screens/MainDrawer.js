@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItem, DrawerItemList } from '@react-navigation/drawer';
 import { Alert, StyleSheet, Text, View } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import DashboardScreen from './DashboardScreen';
 import HistoryScreen from './HistoryScreen';
 import MyStyleProfileScreen from './MyStyleProfileScreen';
@@ -13,18 +14,19 @@ const Drawer = createDrawerNavigator();
 
 
 const CustomDrawerContent = (props) => {
+    const { theme, isDark } = useTheme();
     return (
-        <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1, paddingTop: 40 }}>
-            <View style={styles.drawerHeader}>
-                <View style={styles.logoCircle}>
+        <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1, paddingTop: 40, backgroundColor: theme.background }}>
+            <View style={[styles.drawerHeader, { borderBottomColor: theme.border }]}>
+                <View style={[styles.logoCircle, { backgroundColor: theme.accent }]}>
                     <Text style={styles.logoText}>AI</Text>
                 </View>
-                <Text style={styles.appName}>AI Stylist</Text>
+                <Text style={[styles.appName, { color: theme.text }]}>AI Stylist</Text>
             </View>
             <View style={{ flex: 1 }}>
                 <DrawerItemList {...props} />
             </View>
-            <View style={styles.logoutSection}>
+            <View style={[styles.logoutSection, { borderTopColor: theme.border }]}>
                 <DrawerItem
                     label="Logout"
                     icon={({ color, size }) => <Ionicons name="log-out-outline" size={size} color={color} />}
@@ -42,16 +44,18 @@ const CustomDrawerContent = (props) => {
 };
 
 export default function MainDrawer() {
+    const { theme, isDark } = useTheme();
     return (
         <Drawer.Navigator
             drawerContent={(props) => <CustomDrawerContent {...props} />}
             screenOptions={{
                 headerShown: false,
-                drawerActiveBackgroundColor: '#632024',
+                drawerActiveBackgroundColor: theme.accent,
                 drawerActiveTintColor: '#fff',
-                drawerInactiveTintColor: '#6F4D38',
+                drawerInactiveTintColor: theme.textSecondary,
                 drawerLabelStyle: { fontSize: 16, marginLeft: -10 },
                 drawerItemStyle: { borderRadius: 12, marginHorizontal: 12, marginVertical: 4 },
+                drawerStyle: { backgroundColor: theme.background },
             }}
         >
             <Drawer.Screen
@@ -76,14 +80,6 @@ export default function MainDrawer() {
                 options={{
                     title: 'Generate Outfit',
                     drawerIcon: ({ color, size }) => <Ionicons name="color-wand-outline" size={size} color={color} />
-                }}
-            />
-            <Drawer.Screen
-                name="History"
-                component={HistoryScreen}
-                options={{
-                    title: 'History',
-                    drawerIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} />
                 }}
             />
             <Drawer.Screen

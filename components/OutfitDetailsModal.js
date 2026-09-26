@@ -51,7 +51,7 @@ export default function OutfitDetailsModal({
   const handleVirtualTryon = () => {
       onClose(); // Close the modal first
       // Navigate to VirtualTryon tab with the outfit image pre-loaded
-      navigation.navigate('VirtualTryon', { garmentImageUri: imageUri });
+      navigation.navigate('Main', { screen: 'VirtualTryon', params: { garmentImageUri: imageUri } });
   };
 
   return (

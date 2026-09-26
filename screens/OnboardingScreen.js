@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ScrollView,
 } from "react-native";
+import { Ionicons } from '@expo/vector-icons';
 
 export default function OnboardingScreen({ navigation, route }) {
   const userId = route?.params?.userId ?? null;
@@ -13,6 +14,14 @@ export default function OnboardingScreen({ navigation, route }) {
   const [weather, setWeather] = useState("");
   const [time, setTime] = useState("Day");
   const [occasion, setOccasion] = useState("");
+
+  const handleBack = () => {
+    if (userId && !isGuest) {
+      navigation.navigate('Main', { screen: 'DashboardRoot' });
+    } else {
+      navigation.navigate('Landing');
+    }
+  };
 
   const isNight = time === "Night";
 
@@ -54,8 +63,26 @@ export default function OnboardingScreen({ navigation, route }) {
       {/* MAIN CONTENT */}
       <View style={{ paddingHorizontal: 20 }}>
         
+        {/* Back Button Header */}
+        <View style={{ marginTop: 50, marginBottom: -10, flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity 
+            onPress={handleBack}
+            style={{ 
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: 'rgba(255,255,255,0.2)',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+        </View>
+
         {/* TITLE */}
-        <View style={{ marginTop: 40, marginBottom: 20 }}>
+        <View style={{ marginTop: 30, marginBottom: 20 }}>
           <Text style={[styles.title, { color: theme.text }]}>
             Set your vibe for the day
           </Text>
@@ -65,7 +92,10 @@ export default function OnboardingScreen({ navigation, route }) {
         </View>
 
         {/* WEATHER */}
-        <Text style={[styles.section, { color: theme.text }]}>Weather</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.section, { color: theme.text }]}>Weather</Text>
+          <Text style={[styles.optionalLabel, { color: theme.subText }]}> (Optional)</Text>
+        </View>
         <View style={styles.row}>
           {weatherOptions.map((item) => (
             <TouchableOpacity
@@ -86,9 +116,10 @@ export default function OnboardingScreen({ navigation, route }) {
         </View>
 
         {/* TIME */}
-        <Text style={[styles.section, { color: theme.text }]}>
-          Time of the day
-        </Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.section, { color: theme.text }]}>Time of the day</Text>
+          <Text style={[styles.optionalLabel, { color: theme.subText }]}> (Optional)</Text>
+        </View>
         <View style={[styles.toggleContainer, { backgroundColor: theme.chip }]}>
           {["Day", "Night"].map((item) => (
             <TouchableOpacity
@@ -112,9 +143,10 @@ export default function OnboardingScreen({ navigation, route }) {
         </View>
 
         {/* OCCASION */}
-        <Text style={[styles.section, { color: theme.text }]}>
-          Occasion
-        </Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.section, { color: theme.text }]}>Occasion</Text>
+          <Text style={[styles.optionalLabel, { color: theme.subText }]}> (Optional)</Text>
+        </View>
         <View style={styles.row}>
           {occasionOptions.map((item) => (
             <TouchableOpacity
@@ -175,8 +207,17 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   section: {
-    marginTop: 20,
     fontSize: 16,
+    fontWeight: '600',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 20,
+  },
+  optionalLabel: {
+    fontSize: 12,
+    opacity: 0.6,
   },
   row: {
     flexDirection: "row",

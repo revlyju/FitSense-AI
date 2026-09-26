@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ScrollView,
 } from "react-native";
+import { Ionicons } from '@expo/vector-icons';
 
 export default function PreferencesScreen({ navigation, route }) {
   const [style, setStyle] = useState("");
@@ -68,8 +69,26 @@ export default function PreferencesScreen({ navigation, route }) {
     >
       <View style={{ paddingHorizontal: 20 }}>
 
+        {/* Back Button Header */}
+        <View style={{ marginTop: 50, marginBottom: -10, flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()}
+            style={{ 
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: 'rgba(255,255,255,0.2)',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+        </View>
+
         {/* TITLE */}
-        <View style={{ marginTop: 40, marginBottom: 20 }}>
+        <View style={{ marginTop: 30, marginBottom: 20 }}>
           <Text style={[styles.title, { color: theme.text }]}>Define your style</Text>
           <Text style={[styles.subtitle, { color: theme.subText }]}>
             Tell us what you love wearing
@@ -77,7 +96,10 @@ export default function PreferencesScreen({ navigation, route }) {
         </View>
 
         {/* GENDER */}
-        <Text style={[styles.section, { color: theme.text }]}>Gender</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.section, { color: theme.text }]}>Gender</Text>
+          <Text style={[styles.optionalLabel, { color: theme.subText }]}> (Optional)</Text>
+        </View>
         <View style={styles.row}>
           {genderOptions.map((item) => (
             <TouchableOpacity
@@ -96,7 +118,10 @@ export default function PreferencesScreen({ navigation, route }) {
         </View>
 
         {/* STYLE */}
-        <Text style={[styles.section, { color: theme.text }]}>Style Preference</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.section, { color: theme.text }]}>Style Preference</Text>
+          <Text style={[styles.optionalLabel, { color: theme.subText }]}> (Optional)</Text>
+        </View>
         <View style={styles.row}>
           {styleOptions.map((item) => (
             <TouchableOpacity
@@ -115,7 +140,10 @@ export default function PreferencesScreen({ navigation, route }) {
         </View>
 
         {/* COLOR */}
-        <Text style={[styles.section, { color: theme.text }]}>Color Preference</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.section, { color: theme.text }]}>Color Preference</Text>
+          <Text style={[styles.optionalLabel, { color: theme.subText }]}> (Optional)</Text>
+        </View>
         <View style={styles.row}>
           {colorOptions.map((item) => (
             <TouchableOpacity
@@ -133,7 +161,10 @@ export default function PreferencesScreen({ navigation, route }) {
         </View>
 
         {/* FIT */}
-        <Text style={[styles.section, { color: theme.text }]}>Fit Preference</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.section, { color: theme.text }]}>Fit Preference</Text>
+          <Text style={[styles.optionalLabel, { color: theme.subText }]}> (Optional)</Text>
+        </View>
         <View style={styles.row}>
           {fitOptions.map((item) => (
             <TouchableOpacity
@@ -186,9 +217,17 @@ const styles = StyleSheet.create({
     color: "#6F4D38",
   },
   section: {
-    marginTop: 20,
     fontSize: 16,
-    color: "#25344F",
+    fontWeight: '600',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 20,
+  },
+  optionalLabel: {
+    fontSize: 12,
+    opacity: 0.6,
   },
   row: {
     flexDirection: "row",

@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { createDrawerNavigator, DrawerContentScrollView, DrawerItem, DrawerItemList } from '@react-navigation/drawer';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
+import AIChatbotScreen from './AIChatbotScreen';
 import DashboardScreen from './DashboardScreen';
+import GenerateOutfitScreen from './GenerateOutfitScreen';
 import HistoryScreen from './HistoryScreen';
 import MyStyleProfileScreen from './MyStyleProfileScreen';
-import GenerateOutfitScreen from './GenerateOutfitScreen';
 import SettingsScreen from './SettingsScreen';
-import AIChatbotScreen from './AIChatbotScreen';
 import VirtualTryonScreen from './VirtualTryonScreen';
 
 const Drawer = createDrawerNavigator();
@@ -34,7 +34,7 @@ const CustomDrawerContent = (props) => {
                     onPress={() => {
                         Alert.alert("Logout", "Are you sure you want to log out?", [
                             { text: "Cancel", style: "cancel" },
-                            { text: "Logout", style: 'destructive', onPress: () => props.navigation.replace('Auth') }
+                            { text: "Logout", style: 'destructive', onPress: () => props.navigation.getParent()?.replace('Auth') }
                         ]);
                     }}
                 />
@@ -72,6 +72,14 @@ export default function MainDrawer() {
                 options={{
                     title: 'Liked Outfits',
                     drawerIcon: ({ color, size }) => <Ionicons name="heart-outline" size={size} color={color} />
+                }}
+            />
+            <Drawer.Screen
+                name="History"
+                component={HistoryScreen}
+                options={{
+                    title: 'Analysis History',
+                    drawerIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} />
                 }}
             />
             <Drawer.Screen

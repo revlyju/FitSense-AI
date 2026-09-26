@@ -1,19 +1,25 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Alert, ActivityIndicator, StatusBar
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
 import { API_BASE_URL } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
 
 // Settings components
+import DropdownSelector from '../components/settings/DropdownSelector';
+import MultiSelectChip from '../components/settings/MultiSelectChip';
 import SettingSection from '../components/settings/SettingSection';
 import ToggleSwitch from '../components/settings/ToggleSwitch';
-import MultiSelectChip from '../components/settings/MultiSelectChip';
-import DropdownSelector from '../components/settings/DropdownSelector';
 
 // Options data
 const STYLE_OPTIONS = ['Casual', 'Minimal', 'Streetwear', 'Formal', 'Bohemian', 'Vintage'];
@@ -47,6 +53,9 @@ export default function SettingsScreen({ navigation, route }) {
     const loadUserId = async () => {
       const id = route?.params?.userId || await AsyncStorage.getItem('userId');
       setUserId(id);
+      if (!id) {
+        setLoading(false);
+      }
     };
     loadUserId();
   }, []);
@@ -130,7 +139,7 @@ export default function SettingsScreen({ navigation, route }) {
         style: 'destructive',
         onPress: async () => {
           await AsyncStorage.removeItem('userId');
-          navigation.replace('Auth');
+          navigation.getParent()?.replace('Auth');
         },
       },
     ]);
@@ -141,6 +150,41 @@ export default function SettingsScreen({ navigation, route }) {
       <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.accent} />
         <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading settings...</Text>
+      </View>
+    );
+  }
+
+  if (!loading && !userId) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
+          <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
+            <Ionicons name="menu-outline" size={28} color={theme.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Settings</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <Ionicons name="settings-outline" size={64} color={theme.textSecondary} style={{ marginBottom: 15 }} />
+          <Text style={[styles.loadingText, { color: theme.textSecondary, marginBottom: 20 }]}>Please login to configure settings.</Text>
+          <TouchableOpacity
+            style={{
+              backgroundColor: theme.accent,
+              paddingHorizontal: 24,
+              paddingVertical: 12,
+              borderRadius: 10,
+              shadowColor: theme.accent,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 6,
+              elevation: 4
+            }}
+            onPress={() => navigation.getParent()?.replace('Auth')}
+            activeOpacity={0.8}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Login / Sign Up</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }

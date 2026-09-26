@@ -1,20 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_BASE_URL } from '../config';
 
 export default function HistoryScreen({ navigation }) {
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [userId, setUserId] = useState(null);
 
     const fetchHistory = async () => {
         setLoading(true);
         try {
-            const userId = await AsyncStorage.getItem('userId');
-            if (userId) {
-                const response = await axios.get(`${API_BASE_URL}/api/analysis-history/${userId}`);
+            const storedId = await AsyncStorage.getItem('userId');
+            setUserId(storedId);
+            if (storedId) {
+                const response = await axios.get(`${API_BASE_URL}/api/analysis-history/${storedId}`);
                 setHistory(response.data);
             }
         } catch (e) {
@@ -32,8 +34,8 @@ export default function HistoryScreen({ navigation }) {
     }, [navigation]);
 
     const renderItem = ({ item }) => (
-        <TouchableOpacity 
-            style={styles.card} 
+        <TouchableOpacity
+            style={styles.card}
             activeOpacity={0.8}
             onPress={() => navigation.navigate('HistoryDetail', { id: item._id })}
         >
@@ -47,6 +49,40 @@ export default function HistoryScreen({ navigation }) {
             <Ionicons name="chevron-forward" size={20} color="#ccc" />
         </TouchableOpacity>
     );
+
+    if (!loading && !userId) {
+        return (
+            <View style={styles.container}>
+                <View style={styles.header}>
+                    <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
+                        <Ionicons name="menu-outline" size={28} color="#25344F" />
+                    </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Analysis History</Text>
+                </View>
+                <View style={styles.center}>
+                    <Ionicons name="time-outline" size={64} color="#ccc" />
+                    <Text style={[styles.emptyText, { marginBottom: 20 }]}>Please login to see your analysis history.</Text>
+                    <TouchableOpacity
+                        style={{
+                            backgroundColor: '#632024',
+                            paddingHorizontal: 24,
+                            paddingVertical: 12,
+                            borderRadius: 10,
+                            shadowColor: '#632024',
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.3,
+                            shadowRadius: 6,
+                            elevation: 4
+                        }}
+                        onPress={() => navigation.getParent()?.replace('Auth')}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Login / Sign Up</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        );
+    }
 
     return (
         <View style={styles.container}>

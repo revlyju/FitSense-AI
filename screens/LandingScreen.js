@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
@@ -23,35 +24,47 @@ const LandingScreen = ({ navigation }) => {
   const logoScale = useRef(new Animated.Value(0.7)).current;
 
   useEffect(() => {
-    // Logo pop-in
-    Animated.parallel([
-      Animated.spring(logoScale, { toValue: 1, friction: 5, tension: 80, useNativeDriver: true }),
-      Animated.timing(logoAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-    ]).start();
+    const checkLogin = async () => {
+      try {
+        const storedUserId = await AsyncStorage.getItem('userId');
+        if (storedUserId) {
+          navigation.replace('Main', { screen: 'DashboardRoot', params: { userId: storedUserId } });
+          return;
+        }
+      } catch (err) {
+        console.error('Auto-login check failed:', err);
+      }
 
-    // Stagger content
-    Animated.stagger(120, [
+      // If not logged in, animate the landing page items
       Animated.parallel([
-        Animated.timing(fadeIn, { toValue: 1, duration: 700, easing: Easing.out(Easing.exp), useNativeDriver: true }),
-        Animated.timing(slideUp, { toValue: 0, duration: 700, easing: Easing.out(Easing.exp), useNativeDriver: true }),
-      ]),
-      Animated.spring(btn1Scale, { toValue: 1, friction: 6, tension: 100, useNativeDriver: true }),
-      Animated.spring(btn2Scale, { toValue: 1, friction: 6, tension: 100, useNativeDriver: true }),
-    ]).start();
+        Animated.spring(logoScale, { toValue: 1, friction: 5, tension: 80, useNativeDriver: true }),
+        Animated.timing(logoAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ]).start();
 
-    // Slow blob loops
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(blob1Anim, { toValue: 1, duration: 6000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(blob1Anim, { toValue: 0, duration: 6000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ])
-    ).start();
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(blob2Anim, { toValue: 1, duration: 8000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(blob2Anim, { toValue: 0, duration: 8000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ])
-    ).start();
+      Animated.stagger(120, [
+        Animated.parallel([
+          Animated.timing(fadeIn, { toValue: 1, duration: 700, easing: Easing.out(Easing.exp), useNativeDriver: true }),
+          Animated.timing(slideUp, { toValue: 0, duration: 700, easing: Easing.out(Easing.exp), useNativeDriver: true }),
+        ]),
+        Animated.spring(btn1Scale, { toValue: 1, friction: 6, tension: 100, useNativeDriver: true }),
+        Animated.spring(btn2Scale, { toValue: 1, friction: 6, tension: 100, useNativeDriver: true }),
+      ]).start();
+
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(blob1Anim, { toValue: 1, duration: 6000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(blob1Anim, { toValue: 0, duration: 6000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ])
+      ).start();
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(blob2Anim, { toValue: 1, duration: 8000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(blob2Anim, { toValue: 0, duration: 8000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ])
+      ).start();
+    };
+
+    checkLogin();
   }, []);
 
   const blob1Y = blob1Anim.interpolate({ inputRange: [0, 1], outputRange: [0, -35] });

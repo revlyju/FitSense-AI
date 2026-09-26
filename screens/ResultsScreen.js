@@ -26,10 +26,14 @@ function normalizeColorList(list) {
       if (!item) return null;
 
       if (typeof item === 'string') {
-        const hexMatch = item.match(/#[0-9a-fA-F]{3,8}\b/i) || item.match(/#[0-9a-fA-F]{3,8}/i);
+        let textMatch = item;
+        if (!textMatch.startsWith('#') && /^[0-9a-fA-F]{3,8}$/.test(textMatch.split(' ')[0])) {
+          textMatch = '#' + textMatch;
+        }
+        const hexMatch = textMatch.match(/#[0-9a-fA-F]{3,8}\b/i) || textMatch.match(/#[0-9a-fA-F]{3,8}/i);
         const hex = hexMatch ? hexMatch[0] : undefined;
-        let nameText = hexMatch ? item.replace(hexMatch[0], '').trim() : item.trim();
-        nameText = nameText.replace(/\(\s*\)/g, '').trim() || hex || item;
+        let nameText = hexMatch ? item.replace(hexMatch[0].replace('#', ''), '').replace(hexMatch[0], '').trim() : item.trim();
+        nameText = nameText.replace(/\(\s*\)/g, '').replace(/#$/, '').trim() || hex || item;
 
         return {
           name: nameText,
@@ -39,13 +43,17 @@ function normalizeColorList(list) {
       }
 
       if (typeof item === 'object') {
-        const rawHex = item.hex || item.color || item.value || '';
+        let rawHex = item.hex || item.color || item.value || '';
+        if (typeof rawHex === 'string' && !rawHex.startsWith('#') && /^[0-9a-fA-F]{3,8}$/.test(rawHex)) {
+          rawHex = '#' + rawHex;
+        }
+        
         const hexMatch = typeof rawHex === 'string' ? (rawHex.match(/#[0-9a-fA-F]{3,8}\b/i) || rawHex.match(/#[0-9a-fA-F]{3,8}/i)) : null;
         const hex = hexMatch ? hexMatch[0] : (typeof rawHex === 'string' && rawHex.startsWith('#') ? rawHex : '#cccccc');
 
         let nameText = item.name || item.label || item.color || hex || 'Color';
         if (typeof nameText === 'string' && hex) {
-          nameText = nameText.replace(hex, '').replace(/\(\s*\)/g, '').trim() || nameText;
+          nameText = nameText.replace(hex, '').replace(hex.replace('#',''), '').replace(/\(\s*\)/g, '').trim() || nameText;
         }
 
         return {
@@ -106,20 +114,22 @@ const ResultsScreen = ({ navigation, route }) => {
     reason: '',
   };
 
-  const bestNeutrals = normalizeColorList(analysisResults.bestNeutrals);
+  const actualResults = analysisResults.bestNeutrals || analysisResults.bestColors || analysisResults.bestAccentColors 
+    ? analysisResults 
+    : (analysisResults.analysis || analysisResults);
 
-  const bestAccentColors = normalizeColorList(analysisResults.bestAccentColors);
+  const bestNeutrals = normalizeColorList(actualResults.bestNeutrals || actualResults.bestColors);
+  const bestAccentColors = normalizeColorList(actualResults.bestAccentColors);
+  const avoidColors = normalizeColorList(actualResults.avoidColors);
 
-  const avoidColors = normalizeColorList(analysisResults.avoidColors);
-
-  const outfits = Array.isArray(analysisResults.outfits)
-    ? analysisResults.outfits
+  const outfits = Array.isArray(actualResults.outfits)
+    ? actualResults.outfits
     : [];
 
   const handleSaveLook = async () => {
     try {
-      await AsyncStorage.setItem('@latest_analysis', JSON.stringify(analysisResults));
-      setSavedLooks([...savedLooks, analysisResults]);
+      await AsyncStorage.setItem('@latest_analysis', JSON.stringify(actualResults));
+      setSavedLooks([...savedLooks, actualResults]);
       Alert.alert('Saved', 'This look has been saved! You can view the updated insights in your dashboard.');
     } catch (e) {
       console.error('Failed to save look locally', e);
@@ -130,7 +140,7 @@ const ResultsScreen = ({ navigation, route }) => {
   const handleShareLook = async () => {
     try {
       await Share.share({
-        message: `Check out my AI-generated style profile! Color Season: ${analysisResults.colorSeason}, Recommended metals: ${jewelry.recommended}`,
+        message: `Check out my AI-generated style profile! Color Season: ${actualResults.colorSeason}, Recommended metals: ${jewelry.recommended}`,
         title: 'AI Stylist Profile',
       });
     } catch (error) {
@@ -166,26 +176,41 @@ const ResultsScreen = ({ navigation, route }) => {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={styles.mainWrapper}>
       {/* Header */}
       <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-        {/* Back arrow only for logged-in users who came from a previous screen */}
-        {!isActuallyGuest ? (
-          <TouchableOpacity onPress={handleBack} style={styles.backButton} activeOpacity={0.7}>
-            <Ionicons name="arrow-back" size={22} color="#25344F" />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.backButton} />
-        )}
+        <TouchableOpacity 
+          onPress={() => {
+            if (isActuallyGuest) {
+              navigation.navigate('Onboarding');
+            } else {
+              handleBack();
+            }
+          }} 
+          style={styles.backButton} 
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={22} color="#25344F" />
+        </TouchableOpacity>
+
         <Text style={styles.title}>Your Style Profile</Text>
-        {!isActuallyGuest ? (
-          <TouchableOpacity onPress={handleGoToDashboard} style={styles.dashboardButton} activeOpacity={0.7}>
-            <Ionicons name="home" size={22} color="#25344F" />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.dashboardButton} />
-        )}
+        
+        <TouchableOpacity 
+          onPress={() => {
+            if (isActuallyGuest) {
+              navigation.replace('Auth');
+            } else {
+              handleGoToDashboard();
+            }
+          }} 
+          style={styles.dashboardButton} 
+          activeOpacity={0.7}
+        >
+          <Ionicons name="home" size={22} color="#25344F" />
+        </TouchableOpacity>
       </Animated.View>
+
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
 
       {/* Guest CTA Banner */}
       {isActuallyGuest && (
@@ -209,11 +234,11 @@ const ResultsScreen = ({ navigation, route }) => {
         <Text style={styles.sectionTitle}>Style Summary</Text>
         <View style={styles.summaryCard}>
           {[
-            { label: 'Face Shape', value: analysisResults.faceShape || 'Not Detected' },
-            { label: 'Body Shape', value: analysisResults.bodyShape || 'Not Detected' },
-            { label: 'Undertone',  value: analysisResults.undertone },
-            { label: 'Contrast',   value: analysisResults.contrastLevel },
-            { label: 'Color Season', value: analysisResults.colorSeason },
+            { label: 'Face Shape', value: actualResults.faceShape || 'Not Detected' },
+            { label: 'Body Shape', value: actualResults.bodyShape || 'Not Detected' },
+            { label: 'Undertone',  value: actualResults.undertone },
+            { label: 'Contrast',   value: actualResults.contrastLevel },
+            { label: 'Color Season', value: actualResults.colorSeason },
           ].map(({ label, value }, i) => (
             <View key={i}>
               <View style={styles.summaryRow}>
@@ -225,11 +250,11 @@ const ResultsScreen = ({ navigation, route }) => {
               {i < 4 && <View style={styles.summaryDivider} />}
             </View>
           ))}
-          {analysisResults.colorSeasonConfidence ? (
-            <Text style={styles.confidenceText}>Confidence: {analysisResults.colorSeasonConfidence}%</Text>
+          {actualResults.colorSeasonConfidence ? (
+            <Text style={styles.confidenceText}>Confidence: {actualResults.colorSeasonConfidence}%</Text>
           ) : null}
-          {analysisResults.summaryExplanation ? (
-            <Text style={styles.summaryText}>{analysisResults.summaryExplanation}</Text>
+          {actualResults.summaryExplanation ? (
+            <Text style={styles.summaryText}>{actualResults.summaryExplanation}</Text>
           ) : null}
         </View>
       </View>
@@ -310,11 +335,11 @@ const ResultsScreen = ({ navigation, route }) => {
         </View>
       )}
 
-      {analysisResults.dbOutfits && analysisResults.dbOutfits.length > 0 && (
+      {actualResults.dbOutfits && actualResults.dbOutfits.length > 0 && (
         <View style={styles.outfitsSection}>
           <Text style={styles.sectionTitle}>Shop Recommended Outfits</Text>
           <FlatList
-            data={analysisResults.dbOutfits}
+            data={actualResults.dbOutfits}
             keyExtractor={(item, index) => item.id || index.toString()}
             scrollEnabled={false}
             renderItem={({ item, index }) => (
@@ -327,7 +352,7 @@ const ResultsScreen = ({ navigation, route }) => {
       <View style={styles.outfitsSection}>
         <Text style={styles.sectionTitle}>Recommended Outfits (Stylist Tips)</Text>
         <FlatList
-          data={analysisResults.outfits}
+          data={actualResults.outfits}
           keyExtractor={(item, index) => item.id || index.toString()}
           scrollEnabled={false}
           renderItem={({ item, index }) => (
@@ -371,23 +396,29 @@ const ResultsScreen = ({ navigation, route }) => {
 
       <View style={styles.spacer} />
     </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  mainWrapper: {
     flex: 1,
     backgroundColor: '#D5B893',
-    paddingTop: 50,
+  },
+  container: {
+    flex: 1,
   },
 
   header: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    marginBottom: 24,
+    paddingTop: 62, // Increased for visibility on notch phones
+    paddingBottom: 16,
+    height: 120,
+    backgroundColor: '#D5B893',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    zIndex: 10,
   },
 
   backButton: {

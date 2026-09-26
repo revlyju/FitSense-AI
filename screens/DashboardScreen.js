@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Mock Data / Structure for UI
 const MOCK_INSIGHTS = {
@@ -13,9 +13,9 @@ const MOCK_INSIGHTS = {
 };
 
 import axios from 'axios';
+import OutfitDetailsModal from '../components/OutfitDetailsModal';
 import { API_BASE_URL } from '../config';
 import { getWardrobeEssentials } from '../constants/wardrobeEssentials';
-import OutfitDetailsModal from '../components/OutfitDetailsModal';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function DashboardScreen({ navigation, route }) {
@@ -25,22 +25,22 @@ export default function DashboardScreen({ navigation, route }) {
 
     // Section entrance animations
     const headerAnim = useRef(new Animated.Value(0)).current;
-    const sec1Anim   = useRef(new Animated.Value(0)).current;
-    const sec2Anim   = useRef(new Animated.Value(0)).current;
-    const sec3Anim   = useRef(new Animated.Value(0)).current;
-    const sec4Anim   = useRef(new Animated.Value(0)).current;
+    const sec1Anim = useRef(new Animated.Value(0)).current;
+    const sec2Anim = useRef(new Animated.Value(0)).current;
+    const sec3Anim = useRef(new Animated.Value(0)).current;
+    const sec4Anim = useRef(new Animated.Value(0)).current;
 
     const runEntranceAnimation = () => {
         [headerAnim, sec1Anim, sec2Anim, sec3Anim, sec4Anim].forEach(a => a.setValue(0));
         Animated.stagger(90, [
             headerAnim, sec1Anim, sec2Anim, sec3Anim, sec4Anim
         ].map(a => Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.exp), useNativeDriver: true })))
-        .start();
+            .start();
     };
 
     const slideIn = (anim) => ({
         opacity: anim,
-        transform: [{ translateY: anim.interpolate({ inputRange: [0,1], outputRange: [24, 0] }) }]
+        transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }]
     });
     const [profile, setProfile] = useState(null);
     const [ootd, setOotd] = useState(null);
@@ -53,11 +53,11 @@ export default function DashboardScreen({ navigation, route }) {
     const handleOpenModal = (outfit) => {
         if (!outfit) return;
         setSelectedOutfit(outfit);
-        
+
         // Check if liked from profile
         const outfitIdStr = (outfit.id || outfit._id || "").toString();
         const liked = profile?.likedOutfits?.some(lo => lo.outfitId === outfitIdStr) || false;
-        
+
         setIsLiked(liked);
         setModalVisible(true);
     };
@@ -133,12 +133,12 @@ export default function DashboardScreen({ navigation, route }) {
                     if (response.data.success) {
                         backendName = response.data.userName || 'User';
                         const insights = response.data.styleInsights || {};
-                        backendProfile = { 
-                            ...response.data.userAnalysis, 
-                            ...insights, 
+                        backendProfile = {
+                            ...response.data.userAnalysis,
+                            ...insights,
                             season: insights.colorSeason || response.data.userAnalysis?.colorSeason || 'Unknown',
                             bestColors: [...(insights.bestNeutrals || []), ...(insights.bestAccentColors || [])],
-                            likedOutfits: response.data.likedOutfits || [] 
+                            likedOutfits: response.data.likedOutfits || []
                         };
                         backendOotd = response.data.outfitOfTheDay;
                         backendRecs = response.data.recommendedOutfits;
@@ -146,7 +146,7 @@ export default function DashboardScreen({ navigation, route }) {
                     }
                 } catch (error) {
                     if (error.response && error.response.status === 403) {
-                        navigation.replace('Onboarding', { userId });
+                        navigation.getParent()?.replace('Onboarding', { userId });
                     } else {
                         console.error('Error fetching dashboard data:', error);
                     }
@@ -191,13 +191,13 @@ export default function DashboardScreen({ navigation, route }) {
         };
 
         fetchData();
-        
+
         // Add focus listener to refresh when coming back
         const unsubscribe = navigation.addListener('focus', () => {
-             setLoading(true);
-             fetchData();
+            setLoading(true);
+            fetchData();
         });
-        
+
         return unsubscribe;
     }, [userId, navigation]);
 
@@ -215,8 +215,8 @@ export default function DashboardScreen({ navigation, route }) {
     }
 
     return (
-        <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
-            {/* 1. Welcome Header */}
+        <View style={styles.mainWrapper}>
+            {/* 1. Welcome Header - Now Sticky */}
             <Animated.View style={[styles.header, slideIn(headerAnim)]}>
                 <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
                     <Ionicons name="menu-outline" size={28} color="#25344F" />
@@ -225,254 +225,281 @@ export default function DashboardScreen({ navigation, route }) {
                     <Text style={styles.greeting}>Hey, {profile?.name || 'Stylist'} 👋</Text>
                     <Text style={styles.tagline}>Your curated looks await.</Text>
                 </View>
-                <TouchableOpacity style={styles.profileAvatar}>
+                <TouchableOpacity style={styles.profileAvatar} onPress={() => navigation.navigate('Settings')}>
                     <Text style={styles.avatarText}>{profile?.name ? profile.name[0].toUpperCase() : 'U'}</Text>
                 </TouchableOpacity>
             </Animated.View>
 
-            {/* 2. Outfit of the Day */}
-            <Animated.View style={[styles.section, slideIn(sec1Anim)]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                     <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Outfit of the Day</Text>
-                     {ootd && (
-                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }} onPress={fetchNewLook}>
-                             <Ionicons name="refresh" size={16} color="#632024" />
-                             <Text style={{ color: '#632024', fontSize: 12, fontWeight: '600', marginLeft: 4 }}>Curate Another</Text>
-                        </TouchableOpacity>
-                     )}
-                </View>
-                {ootd ? (
-                    <View style={styles.ootdCard}>
-                        <View style={styles.ootdBadge}>
-                            <Ionicons name="sparkles" size={14} color="#fff" />
-                            <Text style={styles.ootdBadgeText}>AI Selected</Text>
-                        </View>
-                        {ootd.top && ootd.bottom ? (
-                            <>
-                                <Text style={styles.ootdDesc}>Curated Pair</Text>
-                                
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
-                                    <View style={{ flex: 1, marginRight: 8 }}>
-                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#25344F', marginBottom: 6 }}>Top</Text>
-                                        <TouchableOpacity onPress={() => handleOpenModal(ootd.top)}>
-                                            <Image 
-                                                source={{ uri: ootd.top.imageUrl.startsWith('http') ? ootd.top.imageUrl : `${API_BASE_URL}${ootd.top.imageUrl}` }} 
-                                                style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }} 
-                                                resizeMode="contain"
-                                            />
-                                        </TouchableOpacity>
-                                        <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.top.type}</Text>
-                                    </View>
-                                    <View style={{ flex: 1, marginLeft: 8 }}>
-                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#25344F', marginBottom: 6 }}>Bottom</Text>
-                                        <TouchableOpacity onPress={() => handleOpenModal(ootd.bottom)}>
-                                            <Image 
-                                                source={{ uri: ootd.bottom.imageUrl.startsWith('http') ? ootd.bottom.imageUrl : `${API_BASE_URL}${ootd.bottom.imageUrl}` }} 
-                                                style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }} 
-                                                resizeMode="contain"
-                                            />
-                                        </TouchableOpacity>
-                                        <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.bottom.type}</Text>
-                                    </View>
-                                </View>
-                                
-                                <Text style={{ marginBottom: 16, color: '#6F4D38', lineHeight: 20 }}>
-                                    Perfectly matched top and bottom. {ootd.top.matchReasons}
-                                </Text>
-                            </>
-                        ) : (
-                            // Fallback for single legacy format or unstructured recommendations
-                            <>
-                                <Text style={styles.ootdOccasion}>Score: {ootd.score}/10</Text>
-                                <Text style={styles.ootdDesc}>{ootd.type || 'Recommended Outfit'}</Text>
-                                <Text style={{ marginBottom: 12, color: '#6F4D38' }}>{ootd.matchReasons}</Text>
+            <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
 
-                                {ootd.imageUrl ? (
-                                <TouchableOpacity onPress={() => handleOpenModal(ootd)}>
-                                    <Image 
-                                        source={{ uri: ootd.imageUrl.startsWith('http') ? ootd.imageUrl : `${API_BASE_URL}${ootd.imageUrl}` }} 
-                                        style={{ width: '100%', height: 200, borderRadius: 12, marginBottom: 12, backgroundColor: '#fff' }} 
-                                        resizeMode="contain"
-                                    />
-                                </TouchableOpacity>
-                                ) : null}
-                            </>
-                        )}
-
-                    </View>
-                ) : (
-                    <Text style={{ color: '#6F4D38' }}>No Outfit of the Day available.</Text>
-                )}
-            </Animated.View>
-
-            {/* styling history extension */}
-            <Animated.View style={[styles.section, slideIn(sec2Anim)]}>
-                <Text style={styles.sectionTitle}>Styling History</Text>
-                {stylingHistory.length > 0 ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-                        {stylingHistory.map((item, index) => (
-                            <TouchableOpacity 
-                                key={item._id || item.id || index.toString()} 
-                                style={styles.historyCard}
-                                onPress={() => navigation.navigate('Results', { analysisResults: item.analysisData, userPreferences: {} })}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.historyDate}>{new Date(item.date).toLocaleDateString()}</Text>
-                                <Text style={styles.historySeason}>{item.season} • {item.undertone}</Text>
-                                {item.ootdUrl ? (
-                                   <TouchableOpacity onPress={() => handleOpenModal({ imageUrl: item.ootdUrl, type: 'Style History', matchReasons: `${item.season} ${item.undertone} analysis` })}>
-                                      <Image source={{ uri: item.ootdUrl.startsWith('http') ? item.ootdUrl : `${API_BASE_URL}${item.ootdUrl}` }} style={{ width: '100%', height: 100, borderRadius: 8, marginTop: 8 }} />
-                                   </TouchableOpacity>
-                                ) : null}
+                {/* 2. Outfit of the Day */}
+                <Animated.View style={[styles.section, slideIn(sec1Anim)]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Outfit of the Day</Text>
+                        {ootd && (
+                            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }} onPress={fetchNewLook}>
+                                <Ionicons name="refresh" size={16} color="#632024" />
+                                <Text style={{ color: '#632024', fontSize: 12, fontWeight: '600', marginLeft: 4 }}>Curate Another</Text>
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                ) : (
-                    <Text style={{ color: '#6F4D38' }}>No styling history available yet.</Text>
-                )}
-            </Animated.View>
-
-            {/* 3. Recommended Outfits */}
-            <Animated.View style={[styles.section, slideIn(sec3Anim)]}>
-                <Text style={styles.sectionTitle}>Recommended For You</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-                    {recommendations.length > 0 ? recommendations.map((rec, idx) => (
-                        <TouchableOpacity
-                            key={rec._id || rec.id || idx.toString()}
-                            style={styles.recCard}
-                            onPress={() => handleOpenModal(rec)}
-                            activeOpacity={0.88}
-                        >
-                            {rec.imageUrl ? (
-                                <Image
-                                    source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }}
-                                    style={{ width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#F5EDE0' }}
-                                    resizeMode="cover"
-                                />
-                            ) : (
-                                <View style={{ width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#F5EDE0', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Ionicons name="shirt-outline" size={40} color="#C6A57A" />
-                                </View>
-                            )}
-                            <View style={styles.recScoreRow}>
-                                <Ionicons name="star" size={12} color="#632024" />
-                                <Text style={styles.recScoreText}> {rec.score}/10</Text>
+                        )}
+                    </View>
+                    {ootd ? (
+                        <View style={styles.ootdCard}>
+                            <View style={styles.ootdBadge}>
+                                <Ionicons name="sparkles" size={14} color="#fff" />
+                                <Text style={styles.ootdBadgeText}>AI Selected</Text>
                             </View>
-                            <Text style={styles.recTitle} numberOfLines={1}>{rec.type || 'Outfit'}</Text>
-                            <Text style={styles.recDesc} numberOfLines={2}>{rec.matchReasons}</Text>
-                        </TouchableOpacity>
-                    )) : (
-                        <Text style={{ marginLeft: 20, color: '#6F4D38' }}>No recommendations found.</Text>
-                    )}
-                </ScrollView>
-            </Animated.View>
+                            {ootd.top && ootd.bottom ? (
+                                <>
+                                    <Text style={styles.ootdDesc}>Curated Pair</Text>
 
-            {/* 4. Jewellery Recommendations */}
-            <Animated.View style={[styles.section, slideIn(sec4Anim)]}>
-                <Text style={styles.sectionTitle}>Jewellery Match</Text>
-                <View style={styles.jewelGrid}>
-                    <View style={styles.jewelCard}>
-                        <Ionicons name="medal-outline" size={28} color={profile?.jewelry?.recommended?.toLowerCase().includes('gold') && !profile?.jewelry?.recommended?.toLowerCase().includes('white') ? '#FFD700' : '#b0c4de'} />
-                        <Text style={styles.jewelTitle}>{profile?.jewelry?.recommended || 'Silver / White Gold'}</Text>
-                        <Text style={styles.jewelSub}>{profile?.jewelry?.reason || 'Best for your undertones'}</Text>
-                    </View>
-                    <View style={styles.jewelCard}>
-                        <Ionicons name="watch-outline" size={28} color="#25344F" />
-                        <Text style={styles.jewelTitle}>Minimalist Watch</Text>
-                        <Text style={styles.jewelSub}>Leather or mesh band</Text>
-                    </View>
-                </View>
-            </Animated.View>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+                                        <View style={{ flex: 1, marginRight: 8 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#25344F', marginBottom: 6 }}>Top</Text>
+                                            <TouchableOpacity onPress={() => handleOpenModal(ootd.top)}>
+                                                <Image
+                                                    source={{ uri: ootd.top.imageUrl.startsWith('http') ? ootd.top.imageUrl : `${API_BASE_URL}${ootd.top.imageUrl}` }}
+                                                    style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }}
+                                                    resizeMode="contain"
+                                                />
+                                            </TouchableOpacity>
+                                            <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.top.type}</Text>
+                                        </View>
+                                        <View style={{ flex: 1, marginLeft: 8 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#25344F', marginBottom: 6 }}>Bottom</Text>
+                                            <TouchableOpacity onPress={() => handleOpenModal(ootd.bottom)}>
+                                                <Image
+                                                    source={{ uri: ootd.bottom.imageUrl.startsWith('http') ? ootd.bottom.imageUrl : `${API_BASE_URL}${ootd.bottom.imageUrl}` }}
+                                                    style={{ width: '100%', height: 160, borderRadius: 12, backgroundColor: '#fff' }}
+                                                    resizeMode="contain"
+                                                />
+                                            </TouchableOpacity>
+                                            <Text style={{ fontSize: 13, color: '#6F4D38', marginTop: 6 }} numberOfLines={2}>{ootd.bottom.type}</Text>
+                                        </View>
+                                    </View>
 
-            {/* 5. Wardrobe Must-Haves */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Wardrobe Must-Haves</Text>
-                <View style={styles.mustHavesCard}>
-                    {getWardrobeEssentials(profile?.season, profile?.bodyShape).map((item, idx) => (
-                        <View key={idx} style={styles.checkListItem}>
-                            <Ionicons name="checkmark-circle" size={20} color="#632024" />
-                            <Text style={styles.checkListText}>{item}</Text>
+                                    <Text style={{ marginBottom: 16, color: '#6F4D38', lineHeight: 20 }}>
+                                        Perfectly matched top and bottom. {ootd.top.matchReasons}
+                                    </Text>
+                                </>
+                            ) : (
+                                // Fallback for single legacy format or unstructured recommendations
+                                <>
+                                    <Text style={styles.ootdOccasion}>Score: {ootd.score}/10</Text>
+                                    <Text style={styles.ootdDesc}>{ootd.type || 'Recommended Outfit'}</Text>
+                                    <Text style={{ marginBottom: 12, color: '#6F4D38' }}>{ootd.matchReasons}</Text>
+
+                                    {ootd.imageUrl ? (
+                                        <TouchableOpacity onPress={() => handleOpenModal(ootd)}>
+                                            <Image
+                                                source={{ uri: ootd.imageUrl.startsWith('http') ? ootd.imageUrl : `${API_BASE_URL}${ootd.imageUrl}` }}
+                                                style={{ width: '100%', height: 200, borderRadius: 12, marginBottom: 12, backgroundColor: '#fff' }}
+                                                resizeMode="contain"
+                                            />
+                                        </TouchableOpacity>
+                                    ) : null}
+                                </>
+                            )}
+
                         </View>
-                    ))}
+                    ) : (
+                        <Text style={{ color: '#6F4D38' }}>No Outfit of the Day available.</Text>
+                    )}
+                </Animated.View>
+
+                {/* styling history extension */}
+                <Animated.View style={[styles.section, slideIn(sec2Anim)]}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Styling History</Text>
+                        <TouchableOpacity onPress={() => navigation.navigate('History')}>
+                            <Text style={{ color: '#632024', fontSize: 13, fontWeight: '600' }}>View All</Text>
+                        </TouchableOpacity>
+                    </View>
+                    {stylingHistory.length > 0 ? (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                            {stylingHistory.map((item, index) => (
+                                <TouchableOpacity
+                                    key={item._id || item.id || index.toString()}
+                                    style={styles.historyCard}
+                                    onPress={() => navigation.navigate('Results', { analysisResults: item.analysisData, userPreferences: {} })}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.historyDate}>{new Date(item.date).toLocaleDateString()}</Text>
+                                    <Text style={styles.historySeason}>{item.season} • {item.undertone}</Text>
+                                    {item.ootdUrl ? (
+                                        <TouchableOpacity onPress={() => handleOpenModal({ imageUrl: item.ootdUrl, type: 'Style History', matchReasons: `${item.season} ${item.undertone} analysis` })}>
+                                            <Image source={{ uri: item.ootdUrl.startsWith('http') ? item.ootdUrl : `${API_BASE_URL}${item.ootdUrl}` }} style={{ width: '100%', height: 100, borderRadius: 8, marginTop: 8 }} />
+                                        </TouchableOpacity>
+                                    ) : null}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    ) : (
+                        <Text style={{ color: '#6F4D38' }}>No styling history available yet.</Text>
+                    )}
+                </Animated.View>
+
+                {/* 3. Recommended Outfits */}
+                <Animated.View style={[styles.section, slideIn(sec3Anim)]}>
+                    <Text style={styles.sectionTitle}>Recommended For You</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                        {recommendations.length > 0 ? recommendations.map((rec, idx) => (
+                            <TouchableOpacity
+                                key={rec._id || rec.id || idx.toString()}
+                                style={styles.recCard}
+                                onPress={() => handleOpenModal(rec)}
+                                activeOpacity={0.88}
+                            >
+                                {rec.imageUrl ? (
+                                    <Image
+                                        source={{ uri: rec.imageUrl.startsWith('http') ? rec.imageUrl : `${API_BASE_URL}${rec.imageUrl}` }}
+                                        style={{ width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#F5EDE0' }}
+                                        resizeMode="cover"
+                                    />
+                                ) : (
+                                    <View style={{ width: '100%', height: 160, borderRadius: 12, marginBottom: 10, backgroundColor: '#F5EDE0', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Ionicons name="shirt-outline" size={40} color="#C6A57A" />
+                                    </View>
+                                )}
+                                <View style={styles.recScoreRow}>
+                                    <Ionicons name="star" size={12} color="#632024" />
+                                    <Text style={styles.recScoreText}> {rec.score}/10</Text>
+                                </View>
+                                <Text style={styles.recTitle} numberOfLines={1}>{rec.type || 'Outfit'}</Text>
+                                <Text style={styles.recDesc} numberOfLines={2}>{rec.matchReasons}</Text>
+                            </TouchableOpacity>
+                        )) : (
+                            <Text style={{ marginLeft: 20, color: '#6F4D38' }}>No recommendations found.</Text>
+                        )}
+                    </ScrollView>
+                </Animated.View>
+
+                {/* 4. Jewellery Recommendations */}
+                <Animated.View style={[styles.section, slideIn(sec4Anim)]}>
+                    <Text style={styles.sectionTitle}>Jewellery Match</Text>
+                    <View style={styles.jewelGrid}>
+                        <View style={styles.jewelCard}>
+                            <Ionicons name="medal-outline" size={28} color={profile?.jewelry?.recommended?.toLowerCase().includes('gold') && !profile?.jewelry?.recommended?.toLowerCase().includes('white') ? '#FFD700' : '#b0c4de'} />
+                            <Text style={styles.jewelTitle}>{profile?.jewelry?.recommended || 'Silver / White Gold'}</Text>
+                            <Text style={styles.jewelSub}>{profile?.jewelry?.reason || 'Best for your undertones'}</Text>
+                        </View>
+                        <View style={styles.jewelCard}>
+                            <Ionicons name="watch-outline" size={28} color="#25344F" />
+                            <Text style={styles.jewelTitle}>Minimalist Watch</Text>
+                            <Text style={styles.jewelSub}>Leather or mesh band</Text>
+                        </View>
+                    </View>
+                </Animated.View>
+
+                {/* 5. Wardrobe Must-Haves */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Wardrobe Must-Haves</Text>
+                    <View style={styles.mustHavesCard}>
+                        {getWardrobeEssentials(profile?.season, profile?.bodyShape).map((item, idx) => (
+                            <View key={idx} style={styles.checkListItem}>
+                                <Ionicons name="checkmark-circle" size={20} color="#632024" />
+                                <Text style={styles.checkListText}>{item}</Text>
+                            </View>
+                        ))}
+                    </View>
                 </View>
-            </View>
 
-            {/* 6. Style Insights */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Your Style Insights</Text>
-                <View style={styles.insightsGrid}>
-                    <View style={styles.insightBox}>
-                        <Text style={styles.insightLabel}>Season</Text>
-                        <Text style={styles.insightValue}>{profile?.season}</Text>
+                {/* 6. Style Insights */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Your Style Insights</Text>
+                    <View style={styles.insightsGrid}>
+                        <View style={styles.insightBox}>
+                            <Text style={styles.insightLabel}>Season</Text>
+                            <Text style={styles.insightValue}>{profile?.season}</Text>
+                        </View>
+                        <View style={styles.insightBox}>
+                            <Text style={styles.insightLabel}>Undertone</Text>
+                            <Text style={styles.insightValue}>{profile?.undertone}</Text>
+                        </View>
                     </View>
-                    <View style={styles.insightBox}>
-                        <Text style={styles.insightLabel}>Undertone</Text>
-                        <Text style={styles.insightValue}>{profile?.undertone}</Text>
+                    <View style={styles.insightsColorsList}>
+                        <Text style={styles.insightLabel}>Best Colors:</Text>
+                        <View style={styles.paletteRow}>
+                            {profile?.bestColors?.slice(0, 8).map((c, i) => {
+                                const hexColor = typeof c === 'string' ? c : (c?.hex || c?.value || c?.color || '#000000');
+                                const isWhite = hexColor.toUpperCase() === '#FFFFFF' || hexColor.toUpperCase() === '#FFF';
+                                return (
+                                    <View key={i} style={[styles.colorSwatchSmall, {
+                                        backgroundColor: hexColor,
+                                        borderWidth: isWhite ? 1 : 0,
+                                        borderColor: '#eee'
+                                    }]} />
+                                );
+                            })}
+                        </View>
+                        <Text style={[styles.insightLabel, { marginTop: 16 }]}>Colors to Avoid:</Text>
+                        <View style={styles.paletteRow}>
+                            {profile?.avoidColors?.slice(0, 8).map((c, i) => {
+                                const hexColor = typeof c === 'string' ? c : (c?.hex || c?.value || c?.color || '#000000');
+                                return (
+                                    <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: hexColor }]} />
+                                );
+                            })}
+                        </View>
                     </View>
                 </View>
-                <View style={styles.insightsColorsList}>
-                    <Text style={styles.insightLabel}>Best Colors:</Text>
-                    <View style={styles.paletteRow}>
-                        {profile?.bestColors?.slice(0, 8).map((c, i) => {
-                            const hexColor = typeof c === 'string' ? c : (c?.hex || c?.value || c?.color || '#000000');
-                            const isWhite = hexColor.toUpperCase() === '#FFFFFF' || hexColor.toUpperCase() === '#FFF';
-                            return (
-                                <View key={i} style={[styles.colorSwatchSmall, { 
-                                    backgroundColor: hexColor, 
-                                    borderWidth: isWhite ? 1 : 0, 
-                                    borderColor: '#eee' 
-                                }]} />
-                            );
-                        })}
-                    </View>
-                    <Text style={[styles.insightLabel, { marginTop: 16 }]}>Colors to Avoid:</Text>
-                    <View style={styles.paletteRow}>
-                        {profile?.avoidColors?.slice(0, 8).map((c, i) => {
-                            const hexColor = typeof c === 'string' ? c : (c?.hex || c?.value || c?.color || '#000000');
-                            return (
-                                <View key={i} style={[styles.colorSwatchSmall, { backgroundColor: hexColor }]} />
-                            );
-                        })}
-                    </View>
+
+                {/* 7. Quick Actions */}
+                <View style={[styles.section, { paddingBottom: 70 }]}>
+                    <Text style={styles.sectionTitle}>Quick Actions</Text>
+                    <TouchableOpacity
+                        style={styles.actionButtonMain}
+                        onPress={() => navigation.navigate('Onboarding', { userId })}
+                        activeOpacity={0.85}
+                    >
+                        <Ionicons name="color-wand" size={20} color="#fff" />
+                        <Text style={styles.actionButtonMainText}>Update My Style Profile</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.actionButtonSecondary, { marginBottom: 12 }]}
+                        onPress={() => navigation.navigate('AIChatbot')}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="chatbubbles-outline" size={20} color="#25344F" />
+                        <Text style={styles.actionButtonSecondaryText}>Chat with AI Stylist</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.actionButtonSecondary, { marginBottom: 12 }]}
+                        onPress={() => navigation.navigate('VirtualTryon')}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="body-outline" size={20} color="#25344F" />
+                        <Text style={styles.actionButtonSecondaryText}>Virtual Try-On</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.actionButtonSecondary}
+                        onPress={() => navigation.navigate('GenerateOutfit')}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="sparkles-outline" size={20} color="#25344F" />
+                        <Text style={styles.actionButtonSecondaryText}>Style Anything (AI Lab)</Text>
+                    </TouchableOpacity>
                 </View>
-            </View>
 
-            {/* 7. Quick Actions */}
-            <View style={[styles.section, { paddingBottom: 70 }]}>
-                <Text style={styles.sectionTitle}>Quick Actions</Text>
-                <TouchableOpacity
-                    style={styles.actionButtonMain}
-                    onPress={() => navigation.navigate('Onboarding', { userId })}
-                    activeOpacity={0.85}
-                >
-                    <Ionicons name="color-wand" size={20} color="#fff" />
-                    <Text style={styles.actionButtonMainText}>Update My Style Profile</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={styles.actionButtonSecondary}
-                    onPress={() => navigation.navigate('AIChatbot')}
-                    activeOpacity={0.8}
-                >
-                    <Ionicons name="chatbubbles-outline" size={20} color="#25344F" />
-                    <Text style={styles.actionButtonSecondaryText}>Chat with AI Stylist</Text>
-                </TouchableOpacity>
-            </View>
+                <OutfitDetailsModal
+                    visible={modalVisible}
+                    onClose={() => setModalVisible(false)}
+                    outfit={selectedOutfit}
+                    isLiked={isLiked}
+                    onToggleLike={handleToggleLike}
+                />
 
-            <OutfitDetailsModal 
-                visible={modalVisible}
-                onClose={() => setModalVisible(false)}
-                outfit={selectedOutfit}
-                isLiked={isLiked}
-                onToggleLike={handleToggleLike}
-            />
-
-        </ScrollView>
+            </ScrollView>
+        </View>
     );
 }
 const styles = StyleSheet.create({
-    container: {
+    mainWrapper: {
         flex: 1,
         backgroundColor: '#D5B893',
+    },
+    container: {
+        flex: 1,
     },
     loadingContainer: {
         flex: 1,
@@ -496,11 +523,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#EAD8C5',
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(198,165,122,0.5)',
-        shadowColor: '#25344F',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.07,
-        shadowRadius: 8,
-        elevation: 4,
+        zIndex: 10,
     },
     menuButton: {
         padding: 4,

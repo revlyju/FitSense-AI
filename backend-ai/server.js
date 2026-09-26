@@ -172,9 +172,11 @@ const Outfit = outfitsDb.model("Outfit", outfitSchema, "outfits");
 
 const GEMINI_MODELS_TO_TRY = [
   process.env.GEMINI_MODEL,
-  "gemini-2.5-flash",
   "gemini-1.5-flash",
+  "gemini-1.5-flash-latest",
   "gemini-2.0-flash",
+  "gemini-2.0-flash-exp",
+  "gemini-3-flash-preview",
 ].filter(Boolean);
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
@@ -1386,6 +1388,8 @@ Detected Contrast Level: ${pyContrastLevel}
     let lastErrorData = null;
     let lastStatus = 500;
 
+    const models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-3-flash-preview"];
+
     for (const modelName of GEMINI_MODELS_TO_TRY) {
       console.log("Calling Gemini model:", modelName);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`;
@@ -1993,9 +1997,53 @@ app.post("/api/analyze-garment", async (req, res) => {
 });
 
 const PORT = 5000;
+const os = require("os");
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Configure global Axios interceptors for Express backend outbound requests
+axios.interceptors.request.use(
+  (config) => {
+    console.log(`[Backend Axios Request] ${config.method?.toUpperCase()} -> ${config.url}`);
+    return config;
+  },
+  (error) => {
+    console.error('[Backend Axios Request Setup Error]', error);
+    return Promise.reject(error);
+  }
+);
+
+axios.interceptors.response.use(
+  (response) => {
+    console.log(`[Backend Axios Response] ${response.status} <- ${response.config?.url}`);
+    return response;
+  },
+  (error) => {
+    console.error(`[Backend Axios Network Error] Failed request to: ${error.config?.url || 'unknown URL'}`, {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      data: error.response?.data,
+      stack: error.stack
+    });
+    return Promise.reject(error);
+  }
+);
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`\n==================================================`);
+  console.log(`🚀 Node.js Backend listening on port ${PORT}`);
+  console.log(`🔗 Local Loopback: http://localhost:${PORT}`);
+  
+  // Log all available network interfaces
+  const interfaces = os.networkInterfaces();
+  console.log('📡 Available Network Interfaces:');
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name]) {
+      if (net.family === 'IPv4') {
+        console.log(`   - ${name}: http://${net.address}:${PORT}`);
+      }
+    }
+  }
+  console.log(`==================================================\n`);
 });
 
 // AI Chatbot endpoint

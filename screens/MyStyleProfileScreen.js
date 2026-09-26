@@ -1,20 +1,19 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    TouchableOpacity, 
-    ScrollView, 
-    FlatList,
-    ActivityIndicator,
-    Alert
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
-import { API_BASE_URL } from '../config';
+import { useCallback, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
 import DbOutfitCard from '../components/DbOutfitCard';
+import { API_BASE_URL } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function MyStyleProfileScreen({ navigation }) {
@@ -28,11 +27,11 @@ export default function MyStyleProfileScreen({ navigation }) {
             setLoading(true);
             const uid = await AsyncStorage.getItem('userId');
             if (!uid) {
-                navigation.replace('Auth');
+                navigation.getParent()?.replace('Auth');
                 return;
             }
             setUserId(uid);
-            
+
             const response = await axios.get(`${API_BASE_URL}/user-profile/${uid}`);
             setProfile(response.data);
         } catch (error) {
@@ -68,7 +67,24 @@ export default function MyStyleProfileScreen({ navigation }) {
                 </View>
                 <View style={styles.center}>
                     <Ionicons name="heart-outline" size={64} color={theme.textSecondary} />
-                    <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Please login to see your liked outfits</Text>
+                    <Text style={[styles.emptyText, { color: theme.textSecondary, marginBottom: 20 }]}>Please login to see your liked outfits</Text>
+                    <TouchableOpacity
+                        style={{
+                            backgroundColor: theme.accent,
+                            paddingHorizontal: 24,
+                            paddingVertical: 12,
+                            borderRadius: 10,
+                            shadowColor: theme.accent,
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.3,
+                            shadowRadius: 6,
+                            elevation: 4
+                        }}
+                        onPress={() => navigation.getParent()?.replace('Auth')}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Login / Sign Up</Text>
+                    </TouchableOpacity>
                 </View>
             </View>
         );
@@ -87,11 +103,11 @@ export default function MyStyleProfileScreen({ navigation }) {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-                
+
                 {/* STYLE MEMORY ENGINE SECTION */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>🧠 Style Memory Matrix</Text>
-                    
+
                     {!hasMemory ? (
                         <View style={styles.emptyMemoryCard}>
                             <Ionicons name="sparkles-outline" size={32} color="#888" />
@@ -154,12 +170,12 @@ export default function MyStyleProfileScreen({ navigation }) {
                 {/* SAVED OUTFITS LISTING */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>❤️ Liked Wardrobe</Text>
-                    
+
                     {(!populatedLikedOutfits || populatedLikedOutfits.length === 0) ? (
-                         <Text style={styles.emptyText}>No outfits liked yet!</Text>
+                        <Text style={styles.emptyText}>No outfits liked yet!</Text>
                     ) : (
                         populatedLikedOutfits.map((outfit, index) => (
-                            <DbOutfitCard 
+                            <DbOutfitCard
                                 key={outfit.id || index}
                                 outfit={outfit}
                                 index={index}
@@ -168,22 +184,22 @@ export default function MyStyleProfileScreen({ navigation }) {
                         ))
                     )}
                 </View>
-                
-                <View style={{ height: 40 }}/>
+
+                <View style={{ height: 40 }} />
             </ScrollView>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { 
-        flex: 1, 
-        backgroundColor: '#FAF9F6' 
+    container: {
+        flex: 1,
+        backgroundColor: '#FAF9F6'
     },
-    center: { 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        padding: 20 
+    center: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20
     },
     header: {
         flexDirection: 'row',
@@ -195,13 +211,13 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0'
     },
-    menuButton: { 
-        marginRight: 15 
+    menuButton: {
+        marginRight: 15
     },
-    headerTitle: { 
-        fontSize: 20, 
-        fontWeight: '700', 
-        color: '#25344F' 
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#25344F'
     },
     scrollContent: {
         padding: 20
@@ -293,9 +309,9 @@ const styles = StyleSheet.create({
     chipDarkText: {
         color: '#fff'
     },
-    emptyText: { 
-        textAlign: 'center', 
-        color: '#6F4D38', 
+    emptyText: {
+        textAlign: 'center',
+        color: '#6F4D38',
         fontSize: 15,
         fontStyle: 'italic'
     }

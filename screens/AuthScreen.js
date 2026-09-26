@@ -106,6 +106,28 @@ const AuthScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
       
+      {/* Back Button */}
+      <TouchableOpacity 
+        onPress={() => navigation.navigate('Landing')} 
+        style={{ 
+          position: 'absolute', 
+          top: 60, 
+          left: 20, 
+          zIndex: 20,
+          width: 42,
+          height: 42,
+          borderRadius: 21,
+          backgroundColor: 'rgba(255,255,255,0.25)',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.1)'
+        }}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="arrow-back" size={24} color="#25344F" />
+      </TouchableOpacity>
+      
       {/* Background Blobs (Abstract floating shapes) */}
       <Animated.View style={[styles.blob1, { transform: [{ translateY: blob1Y }, { scale: blobScale }] }]} />
       <Animated.View style={[styles.blob2, { transform: [{ translateY: blob2Y }, { scale: blobScale }] }]} />

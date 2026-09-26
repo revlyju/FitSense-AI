@@ -31,6 +31,26 @@ async def lifespan(app: FastAPI):
             "Add face_landmarker.task next to app.py (see MediaPipe face landmarker bundle)."
         )
 
+    # Print listening interfaces on startup
+    import socket
+    print("\n==================================================")
+    print("🚀 FastAPI Python Service starting up...")
+    print("🔗 Local Loopback: http://localhost:8000")
+    try:
+        hostname = socket.gethostname()
+        print("📡 Available Network Interfaces:")
+        # Attempt to get all IP addresses associated with this host
+        ips = []
+        for info in socket.getaddrinfo(hostname, None):
+            ip = info[4][0]
+            if '.' in ip and ip not in ips and not ip.startswith('127.'):
+                ips.append(ip)
+        for ip in ips:
+            print(f"   - {ip}: http://{ip}:8000")
+    except Exception as e:
+        print(f"   - Failed to resolve hostname IPs: {e}")
+    print("==================================================\n")
+
     options = FaceLandmarkerOptions(
         base_options=base_options.BaseOptions(model_asset_path=str(MODEL_PATH)),
         running_mode=RunningMode.IMAGE,
@@ -199,18 +219,9 @@ async def analyze_face(file: UploadFile = File(...)):
         censored_image = image_bgr.copy()
 
         if cx2 > cx1 and cy2 > cy1:
-            # ROI for the face
-            face_roi = censored_image[cy1:cy2, cx1:cx2]
-            
-            # Apply a strong Gaussian blur to anonymize the face
-            # ksize must be odd. We'll use a size based on face width.
-            ksize = int((cx2 - cx1) / 4)
-            if ksize % 2 == 0: ksize += 1
-            if ksize < 3: ksize = 3
-            
-            blurred_face = cv2.GaussianBlur(face_roi, (ksize, ksize), 30)
-            censored_image[cy1:cy2, cx1:cx2] = blurred_face
-            print(f"PIPELINE SUCCESS: Face detected and blurred at [{cx1}, {cy1}, {cx2}, {cy2}]")
+            # Draw a solid black rectangle over the face area
+            cv2.rectangle(censored_image, (cx1, cy1), (cx2, cy2), (0, 0, 0), -1)
+            print(f"PIPELINE SUCCESS: Face detected and censored with rectangle at [{cx1}, {cy1}, {cx2}, {cy2}]")
         else:
             print("PIPELINE WARNING: Face landmarks found but bounding box invalid.")
 

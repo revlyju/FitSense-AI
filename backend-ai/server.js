@@ -26,6 +26,14 @@ app.use(express.json({ limit: "75mb" }));
 // Serve static outfit images from the outfit_img folder
 app.use("/outfit_img", express.static(path.join(__dirname, "outfit_img")));
 
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "AI Stylist Backend is running" });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", service: "ai-stylist-node-backend" });
+});
+
 const uri = process.env.MONGODB_URI;
 
 const connectDB = async () => {

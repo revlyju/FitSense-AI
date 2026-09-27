@@ -1,0 +1,21 @@
+# EAS Build Ignore
+.expo/
+node_modules/
+backend-ai/
+python-service/
+dist/
+web-build/
+.git/
+.vscode/
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+.DS_Store
+*.pem
+*.tsbuildinfo

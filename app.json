@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.revzzzzz.AIStylist"
     },
     "web": {
       "output": "single",
@@ -39,6 +40,11 @@
     ],
     "experiments": {
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "4eb30398-1a20-443c-9cd9-d469bc8a02f6"
+      }
     }
   }
 }

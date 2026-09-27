@@ -167,11 +167,17 @@ const ResultsScreen = ({ navigation, route }) => {
           params: { userId: storedUserId }
         });
       } else {
-        navigation.replace('Auth');
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
       }
     } catch (e) {
       console.error('Error reading userId:', e);
-      navigation.replace('Auth');
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
     }
   };
 
@@ -182,7 +188,10 @@ const ResultsScreen = ({ navigation, route }) => {
         <TouchableOpacity 
           onPress={() => {
             if (isActuallyGuest) {
-              navigation.navigate('Onboarding');
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
             } else {
               handleBack();
             }
@@ -198,7 +207,10 @@ const ResultsScreen = ({ navigation, route }) => {
         <TouchableOpacity 
           onPress={() => {
             if (isActuallyGuest) {
-              navigation.replace('Auth');
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
             } else {
               handleGoToDashboard();
             }

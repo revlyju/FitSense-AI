@@ -93,7 +93,15 @@ const AuthScreen = ({ navigation }) => {
 
       if (response.data.success) {
         await AsyncStorage.setItem('userId', response.data.userId);
-        navigation.navigate('Main', { screen: 'DashboardRoot', params: { userId: response.data.userId } });
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'Main',
+              params: { screen: 'DashboardRoot', params: { userId: response.data.userId } },
+            },
+          ],
+        });
       }
     } catch (error) {
       console.error('Auth error:', error);
@@ -219,7 +227,7 @@ const AuthScreen = ({ navigation }) => {
               </Text>
             </TouchableOpacity>
             
-            <TouchableOpacity onPress={() => navigation.navigate('Onboarding')} activeOpacity={0.6} style={styles.guestBtn}>
+            <TouchableOpacity onPress={() => navigation.navigate('GuestOnboarding')} activeOpacity={0.6} style={styles.guestBtn}>
               <Text style={styles.guestText}>Or continue as Guest</Text>
             </TouchableOpacity>
           </Animated.View>

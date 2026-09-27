@@ -53,6 +53,13 @@ const LoadingScreen = ({ navigation, route }) => {
           }
         }
 
+        let customGeminiKey = null;
+        try {
+          customGeminiKey = await AsyncStorage.getItem('geminiApiKey');
+        } catch (e) {
+          console.error("Failed to read custom geminiApiKey", e);
+        }
+
         const payload = {
           gender: userPreferences.gender,
           userGender,
@@ -66,6 +73,10 @@ const LoadingScreen = ({ navigation, route }) => {
           fitPreference: userPreferences.fitPreference,
           image: userPreferences.image, // base64 string
           userId: activeUserId, // Explicitly pass resolved ID
+          geminiApiKey: customGeminiKey || undefined,
+          isPreprocessed: userPreferences.isPreprocessed || false,
+          faceShape: userPreferences.faceShape,
+          contrastLevel: userPreferences.contrastLevel,
         };
 
         const response = await axios.post(`${API_BASE_URL}/analyze-style`, payload, {

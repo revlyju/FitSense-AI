@@ -8,13 +8,17 @@ import {
   Alert,
   ScrollView,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import { API_BASE_URL } from '../config';
 
 export default function UploadScreen({ navigation, route }) {
   const [imageUri, setImageUri] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
+  const [isPreprocessing, setIsPreprocessing] = useState(false);
   const userPreferences = route?.params?.userPreferences || {};
   const userId = route?.params?.userId ?? null;
   const isGuest = route?.params?.isGuest || false;
@@ -56,20 +60,66 @@ export default function UploadScreen({ navigation, route }) {
     }
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!imageUri || !imageBase64) {
       Alert.alert('Missing Image', 'Please upload a photo of yourself first.');
       return;
     }
 
-    navigation.navigate('Loading', {
-      userId,
-      isGuest,
-      userPreferences: {
-        ...userPreferences,
+    setIsPreprocessing(true);
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/preprocess-image`, {
         image: `data:image/jpeg;base64,${imageBase64}`,
-      },
-    });
+      }, {
+        timeout: 45000,
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const data = response.data;
+      const censoredImage = data?.censoredImage || `data:image/jpeg;base64,${imageBase64}`;
+
+      navigation.navigate('CensorReview', {
+        userId,
+        isGuest: false,
+        userPreferences: {
+          ...userPreferences,
+          image: censoredImage,
+          originalImage: `data:image/jpeg;base64,${imageBase64}`,
+        },
+        censoredImage,
+        faceDetected: !!data?.faceDetected,
+        faceShape: data?.faceShape || 'Unknown',
+        contrastLevel: data?.contrastLevel || 'Unknown',
+      });
+    } catch (err) {
+      console.error('Error preprocessing image:', err);
+      Alert.alert(
+        'Privacy Verification',
+        'Could not complete automated face concealment. Would you like to review the photo before proceeding?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Review Photo',
+            onPress: () => {
+              navigation.navigate('CensorReview', {
+                userId,
+                isGuest: false,
+                userPreferences: {
+                  ...userPreferences,
+                  image: `data:image/jpeg;base64,${imageBase64}`,
+                },
+                censoredImage: `data:image/jpeg;base64,${imageBase64}`,
+                faceDetected: false,
+                faceShape: 'Unknown',
+                contrastLevel: 'Unknown',
+              });
+            },
+          },
+        ]
+      );
+    } finally {
+      setIsPreprocessing(false);
+    }
   };
 
   return (
@@ -158,14 +208,23 @@ export default function UploadScreen({ navigation, route }) {
           style={[
             styles.continueButton,
             { backgroundColor: theme.accent },
-            !imageUri && styles.disabledButton,
+            (!imageUri || isPreprocessing) && styles.disabledButton,
           ]}
           onPress={handleContinue}
-          disabled={!imageUri}
+          disabled={!imageUri || isPreprocessing}
           activeOpacity={0.9}
         >
-          <Text style={styles.continueButtonText}>Analyze My Style</Text>
-          <Ionicons name="arrow-forward" size={18} color="#fff" style={{ marginLeft: 8 }} />
+          {isPreprocessing ? (
+            <>
+              <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.continueButtonText}>Processing Face Privacy...</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.continueButtonText}>Analyze My Style</Text>
+              <Ionicons name="arrow-forward" size={18} color="#fff" style={{ marginLeft: 8 }} />
+            </>
+          )}
         </TouchableOpacity>
 
       </ScrollView>

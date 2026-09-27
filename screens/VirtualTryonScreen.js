@@ -5,11 +5,13 @@ import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
+import useRequireAuth from '../hooks/useRequireAuth';
 
 const { width } = Dimensions.get('window');
 
 export default function VirtualTryonScreen({ navigation, route }) {
     const { theme, isDark } = useTheme();
+    const { isAuthenticated, isVerifying } = useRequireAuth();
     const [personImage, setPersonImage] = useState(null);
     const [outfitImage, setOutfitImage] = useState(null);
     const [resultImage, setResultImage] = useState(null);
@@ -21,6 +23,14 @@ export default function VirtualTryonScreen({ navigation, route }) {
             setOutfitImage(route.params.garmentImageUri);
         }
     }, [route?.params?.garmentImageUri]);
+
+    if (isVerifying || !isAuthenticated) {
+        return (
+            <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={theme.accent} />
+            </View>
+        );
+    }
 
     const pickImage = async (setImageCallback) => {
         try {

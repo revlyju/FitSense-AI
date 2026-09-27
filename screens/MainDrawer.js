@@ -13,6 +13,9 @@ import VirtualTryonScreen from './VirtualTryonScreen';
 const Drawer = createDrawerNavigator();
 
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import useRequireAuth from '../hooks/useRequireAuth';
+
 const CustomDrawerContent = (props) => {
     const { theme, isDark } = useTheme();
     return (
@@ -34,7 +37,23 @@ const CustomDrawerContent = (props) => {
                     onPress={() => {
                         Alert.alert("Logout", "Are you sure you want to log out?", [
                             { text: "Cancel", style: "cancel" },
-                            { text: "Logout", style: 'destructive', onPress: () => props.navigation.getParent()?.replace('Auth') }
+                            {
+                                text: "Logout",
+                                style: 'destructive',
+                                onPress: async () => {
+                                    try {
+                                        await AsyncStorage.removeItem('userId');
+                                        await AsyncStorage.removeItem('@latest_analysis');
+                                    } catch (e) {
+                                        console.error("Logout error:", e);
+                                    }
+                                    const rootNav = props.navigation.getParent() || props.navigation;
+                                    rootNav.reset({
+                                        index: 0,
+                                        routes: [{ name: 'Login' }],
+                                    });
+                                }
+                            }
                         ]);
                     }}
                 />
@@ -45,6 +64,16 @@ const CustomDrawerContent = (props) => {
 
 export default function MainDrawer() {
     const { theme, isDark } = useTheme();
+    const { isAuthenticated, isVerifying } = useRequireAuth();
+
+    if (isVerifying || !isAuthenticated) {
+        return (
+            <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ color: theme.textSecondary, marginTop: 10 }}>Verifying security...</Text>
+            </View>
+        );
+    }
+
     return (
         <Drawer.Navigator
             drawerContent={(props) => <CustomDrawerContent {...props} />}

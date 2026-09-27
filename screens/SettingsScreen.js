@@ -9,6 +9,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -28,13 +29,21 @@ const COLOR_COMFORT_OPTIONS = ['Neutral', 'Balanced', 'Bold'];
 const AVOID_COLORS = ['Neon', 'Pastels', 'Earth Tones', 'Jewel Tones', 'Bright', 'Dark'];
 const AVOID_PATTERNS = ['Floral', 'Plaid', 'Animal Print', 'Polka Dots', 'Stripes', 'Abstract'];
 const AVOID_FITS = ['Tight', 'Baggy', 'Cropped', 'High-Waisted', 'Low-Rise'];
+import useRequireAuth from '../hooks/useRequireAuth';
 
 export default function SettingsScreen({ navigation, route }) {
   const { theme, isDark, toggleTheme } = useTheme();
+  const { isAuthenticated, userId: authUserId, isVerifying } = useRequireAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userId, setUserId] = useState(null);
   const [profile, setProfile] = useState({ name: '', email: '' });
+
+  // Custom Gemini API Key state
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
+  const [keyStatus, setKeyStatus] = useState(null);
 
   // Settings state
   const [settings, setSettings] = useState({
@@ -43,22 +52,17 @@ export default function SettingsScreen({ navigation, route }) {
     privacy: { blurFace: true, storeImages: false, deleteAfterAnalysis: true },
     notifications: { ootd: true, recommendations: true },
     theme: { mode: 'light' },
+    geminiApiKey: '',
   });
 
   // Debounce timer ref
   const debounceRef = useRef(null);
 
-  // Get userId on mount
   useEffect(() => {
-    const loadUserId = async () => {
-      const id = route?.params?.userId || await AsyncStorage.getItem('userId');
-      setUserId(id);
-      if (!id) {
-        setLoading(false);
-      }
-    };
-    loadUserId();
-  }, []);
+    if (authUserId) {
+      setUserId(authUserId);
+    }
+  }, [authUserId]);
 
   // Fetch settings when userId is available
   useEffect(() => {
@@ -69,6 +73,14 @@ export default function SettingsScreen({ navigation, route }) {
         if (res.data.success) {
           setSettings(res.data.settings);
           setProfile(res.data.profile);
+          const savedKey = res.data.settings?.geminiApiKey;
+          if (savedKey) {
+            setApiKeyInput(savedKey);
+            await AsyncStorage.setItem('geminiApiKey', savedKey);
+          } else {
+            const localKey = await AsyncStorage.getItem('geminiApiKey');
+            if (localKey) setApiKeyInput(localKey);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch settings:', err);
@@ -78,6 +90,59 @@ export default function SettingsScreen({ navigation, route }) {
     };
     fetchSettings();
   }, [userId]);
+
+  const handleVerifyApiKey = async () => {
+    if (!apiKeyInput.trim()) {
+      Alert.alert('Empty Key', 'Please enter a Gemini API Key to verify.');
+      return;
+    }
+    setTestingKey(true);
+    setKeyStatus(null);
+    try {
+      const res = await axios.post(`${API_BASE_URL}/api/verify-gemini-key`, {
+        apiKey: apiKeyInput.trim(),
+      });
+      if (res.data.success) {
+        setKeyStatus({ valid: true, message: 'Valid! Verified with Google Gemini.' });
+        await handleSaveApiKey(apiKeyInput.trim(), true);
+      }
+    } catch (e) {
+      const msg = e.response?.data?.error || e.message || 'Key verification failed';
+      setKeyStatus({ valid: false, message: msg });
+    } finally {
+      setTestingKey(false);
+    }
+  };
+
+  const handleSaveApiKey = async (key, silent = false) => {
+    const keyToSave = key !== undefined ? key : apiKeyInput.trim();
+    try {
+      if (keyToSave) {
+        await AsyncStorage.setItem('geminiApiKey', keyToSave);
+      } else {
+        await AsyncStorage.removeItem('geminiApiKey');
+      }
+      if (userId) {
+        await axios.put(`${API_BASE_URL}/user/settings`, {
+          userId,
+          settings: { geminiApiKey: keyToSave },
+        });
+      }
+      setSettings((prev) => ({ ...prev, geminiApiKey: keyToSave }));
+      if (!silent) {
+        Alert.alert('Settings Saved', keyToSave ? 'Custom Gemini API Key saved!' : 'Reverted to default server Gemini API Key.');
+      }
+    } catch (err) {
+      console.error('Failed to save API key:', err);
+      if (!silent) Alert.alert('Error', 'Failed to save API key settings.');
+    }
+  };
+
+  const handleClearApiKey = async () => {
+    setApiKeyInput('');
+    setKeyStatus(null);
+    await handleSaveApiKey('', false);
+  };
 
   // Debounced save to backend
   const saveSettings = useCallback((updatedSettings) => {
@@ -138,53 +203,29 @@ export default function SettingsScreen({ navigation, route }) {
         text: 'Logout',
         style: 'destructive',
         onPress: async () => {
-          await AsyncStorage.removeItem('userId');
-          navigation.getParent()?.replace('Auth');
+          try {
+            await AsyncStorage.removeItem('userId');
+            await AsyncStorage.removeItem('@latest_analysis');
+          } catch (e) {
+            console.error('Logout error:', e);
+          }
+          const rootNav = navigation.getParent() || navigation;
+          rootNav.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
         },
       },
     ]);
   };
 
-  if (loading) {
+  if (isVerifying || !isAuthenticated || loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.accent} />
-        <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading settings...</Text>
-      </View>
-    );
-  }
-
-  if (!loading && !userId) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.background }]}>
-        {/* Header */}
-        <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-          <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-            <Ionicons name="menu-outline" size={28} color={theme.text} />
-          </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Settings</Text>
-        </View>
-        <View style={styles.loadingContainer}>
-          <Ionicons name="settings-outline" size={64} color={theme.textSecondary} style={{ marginBottom: 15 }} />
-          <Text style={[styles.loadingText, { color: theme.textSecondary, marginBottom: 20 }]}>Please login to configure settings.</Text>
-          <TouchableOpacity
-            style={{
-              backgroundColor: theme.accent,
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              borderRadius: 10,
-              shadowColor: theme.accent,
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.3,
-              shadowRadius: 6,
-              elevation: 4
-            }}
-            onPress={() => navigation.getParent()?.replace('Auth')}
-            activeOpacity={0.8}
-          >
-            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Login / Sign Up</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+          {isVerifying ? 'Verifying security...' : 'Loading settings...'}
+        </Text>
       </View>
     );
   }
@@ -344,7 +385,95 @@ export default function SettingsScreen({ navigation, route }) {
           />
         </SettingSection>
 
-        {/* 6. Theme */}
+        {/* 6. Custom Gemini API Key (Optional) */}
+        <SettingSection title="Custom Gemini API Key (Optional)" theme={theme}>
+          <Text style={[styles.sectionDescription, { color: theme.textSecondary }]}>
+            Optionally use your personal Google Gemini API key for image analysis & outfit generation. If left blank, the app uses the server default key.
+          </Text>
+
+          <View style={[styles.apiKeyInputWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#fff', borderColor: theme.border }]}>
+            <Ionicons name="key-outline" size={18} color={theme.accent} style={{ marginRight: 10 }} />
+            <TextInput
+              style={[styles.apiKeyInput, { color: theme.text }]}
+              placeholder="Paste your Gemini API Key"
+              placeholderTextColor={theme.textSecondary}
+              value={apiKeyInput}
+              onChangeText={(t) => {
+                setApiKeyInput(t);
+                setKeyStatus(null);
+              }}
+              secureTextEntry={!showApiKey}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TouchableOpacity
+              onPress={() => setShowApiKey(!showApiKey)}
+              style={{ padding: 6 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={showApiKey ? 'eye-outline' : 'eye-off-outline'}
+                size={20}
+                color={theme.textSecondary}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {keyStatus && (
+            <View style={[
+              styles.statusBox,
+              {
+                backgroundColor: keyStatus.valid ? 'rgba(46, 125, 50, 0.12)' : 'rgba(211, 47, 47, 0.12)',
+                borderColor: keyStatus.valid ? '#2e7d32' : '#d32f2f'
+              }
+            ]}>
+              <Ionicons
+                name={keyStatus.valid ? 'checkmark-circle' : 'alert-circle'}
+                size={18}
+                color={keyStatus.valid ? '#2e7d32' : '#d32f2f'}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={[styles.statusText, { color: keyStatus.valid ? '#2e7d32' : '#d32f2f' }]}>
+                {keyStatus.message}
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.apiActionsRow}>
+            <TouchableOpacity
+              style={[styles.apiActionBtn, { backgroundColor: theme.accent }]}
+              onPress={handleVerifyApiKey}
+              disabled={testingKey}
+              activeOpacity={0.8}
+            >
+              {testingKey ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="shield-checkmark-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.apiActionBtnText}>Test & Save Key</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {apiKeyInput.trim() !== '' && (
+              <TouchableOpacity
+                style={[styles.clearBtn, { borderColor: theme.border }]}
+                onPress={handleClearApiKey}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={16} color={theme.textSecondary} style={{ marginRight: 4 }} />
+                <Text style={[styles.clearBtnText, { color: theme.textSecondary }]}>Remove</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <Text style={[styles.keyHint, { color: theme.textSecondary }]}>
+            Tip: You can get a free key from Google AI Studio (aistudio.google.com)
+          </Text>
+        </SettingSection>
+
+        {/* 7. Theme */}
         <SettingSection title="Appearance" theme={theme}>
           <ToggleSwitch
             label="Dark Mode"
@@ -491,5 +620,73 @@ const styles = StyleSheet.create({
   themePreviewText: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  sectionDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  apiKeyInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  apiKeyInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 2,
+  },
+  statusBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  apiActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  apiActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+  },
+  apiActionBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  clearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  clearBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  keyHint: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 });

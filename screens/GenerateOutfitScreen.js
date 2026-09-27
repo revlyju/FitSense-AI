@@ -1,19 +1,30 @@
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_BASE_URL } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
+import useRequireAuth from '../hooks/useRequireAuth';
 
 const { width } = Dimensions.get('window');
 
 export default function GenerateOutfitScreen({ navigation }) {
     const { theme, isDark } = useTheme();
+    const { isAuthenticated, isVerifying } = useRequireAuth();
     const [imageUri, setImageUri] = useState(null);
     const [imageBase64, setImageBase64] = useState(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [analysis, setAnalysis] = useState(null);
+
+    if (isVerifying || !isAuthenticated) {
+        return (
+            <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={theme.accent} />
+            </View>
+        );
+    }
 
     const pickImage = async () => {
         try {
@@ -50,8 +61,16 @@ export default function GenerateOutfitScreen({ navigation }) {
         setIsGenerating(true);
 
         try {
+            let customKey = null;
+            try {
+                customKey = await AsyncStorage.getItem('geminiApiKey');
+            } catch (e) {
+                console.error("Failed to read geminiApiKey", e);
+            }
+
             const response = await axios.post(`${API_BASE_URL}/api/analyze-garment`, {
-                image: imageBase64
+                image: imageBase64,
+                geminiApiKey: customKey || undefined,
             });
 
             if (response.data.success && response.data.analysis) {

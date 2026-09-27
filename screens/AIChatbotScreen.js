@@ -16,9 +16,11 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
+import useRequireAuth from '../hooks/useRequireAuth';
 
 export default function AIChatbotScreen({ navigation }) {
     const { theme, isDark } = useTheme();
+    const { isAuthenticated, userId: authUserId, isVerifying } = useRequireAuth();
     const [messages, setMessages] = useState([
         { id: '1', text: "Hello! I'm your AI Stylist. How can I help you with your look today?", sender: 'ai' }
     ]);
@@ -28,12 +30,18 @@ export default function AIChatbotScreen({ navigation }) {
     const flatListRef = useRef(null);
 
     useEffect(() => {
-        const getUid = async () => {
-            const uid = await AsyncStorage.getItem('userId');
-            setUserId(uid);
-        };
-        getUid();
-    }, []);
+        if (authUserId) {
+            setUserId(authUserId);
+        }
+    }, [authUserId]);
+
+    if (isVerifying || !isAuthenticated) {
+        return (
+            <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={theme.accent} />
+            </View>
+        );
+    }
 
     const sendMessage = async () => {
         if (inputText.trim() === '' || loading) return;

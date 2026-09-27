@@ -17,10 +17,12 @@ import OutfitDetailsModal from '../components/OutfitDetailsModal';
 import { API_BASE_URL } from '../config';
 import { getWardrobeEssentials } from '../constants/wardrobeEssentials';
 import { useTheme } from '../contexts/ThemeContext';
+import useRequireAuth from '../hooks/useRequireAuth';
 
 export default function DashboardScreen({ navigation, route }) {
     const { theme, isDark } = useTheme();
-    const userId = route?.params?.userId || null;
+    const { isAuthenticated, userId: authUserId, isVerifying } = useRequireAuth();
+    const userId = authUserId || route?.params?.userId || null;
     const [loading, setLoading] = useState(true);
 
     // Section entrance animations
@@ -205,11 +207,13 @@ export default function DashboardScreen({ navigation, route }) {
         if (!loading) runEntranceAnimation();
     }, [loading]);
 
-    if (loading) {
+    if (isVerifying || !isAuthenticated || loading) {
         return (
             <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
                 <ActivityIndicator size="large" color="#632024" />
-                <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Curating your look...</Text>
+                <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+                    {isVerifying ? "Verifying security..." : "Curating your look..."}
+                </Text>
             </View>
         );
     }

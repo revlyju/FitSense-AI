@@ -15,24 +15,22 @@ import {
 import DbOutfitCard from '../components/DbOutfitCard';
 import { API_BASE_URL } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
+import useRequireAuth from '../hooks/useRequireAuth';
 
 export default function MyStyleProfileScreen({ navigation }) {
     const { theme, isDark } = useTheme();
+    const { isAuthenticated, userId: authUserId, isVerifying } = useRequireAuth();
     const [userId, setUserId] = useState(null);
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const fetchProfile = async () => {
+        if (!authUserId) return;
         try {
             setLoading(true);
-            const uid = await AsyncStorage.getItem('userId');
-            if (!uid) {
-                navigation.getParent()?.replace('Auth');
-                return;
-            }
-            setUserId(uid);
+            setUserId(authUserId);
 
-            const response = await axios.get(`${API_BASE_URL}/user-profile/${uid}`);
+            const response = await axios.get(`${API_BASE_URL}/user-profile/${authUserId}`);
             setProfile(response.data);
         } catch (error) {
             console.error('Failed to load profile', error);
@@ -48,7 +46,7 @@ export default function MyStyleProfileScreen({ navigation }) {
         }, [])
     );
 
-    if (loading) {
+    if (isVerifying || !isAuthenticated || loading) {
         return (
             <View style={[styles.container, styles.center, { backgroundColor: theme.background }]}>
                 <ActivityIndicator size="large" color={theme.accent} />

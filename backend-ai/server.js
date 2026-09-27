@@ -104,7 +104,8 @@ const userSchema = new mongoose.Schema({
     },
     theme: {
       mode: { type: String, default: "light" }
-    }
+    },
+    geminiApiKey: { type: String, default: "" }
   },
   createdAt: { type: Date, default: Date.now },
 });
@@ -1188,6 +1189,74 @@ function generateOOTD(dbOutfits, userProfile) {
   return getSmartRecommendations(dbOutfits, userProfile)[0] || null;
 }
 
+// ==========================================
+// PREPROCESS IMAGE: RUN PYTHON FACE PIPELINE
+// Returns censored image for user review BEFORE sending to Gemini API
+// ==========================================
+app.post("/api/preprocess-image", async (req, res) => {
+  try {
+    const { image } = req.body || {};
+    const parsedImage = parseImageBase64(image);
+
+    if (!parsedImage || !parsedImage.data) {
+      return res.status(400).json({ error: "No image provided" });
+    }
+
+    let finalImageData = parsedImage.data;
+    let faceDetected = false;
+    let faceShape = "Unknown";
+    let contrastLevel = "Unknown";
+
+    try {
+      const imageBuffer = Buffer.from(parsedImage.data, 'base64');
+      const form = new FormData();
+      form.append('file', imageBuffer, {
+        filename: 'upload.jpg',
+        contentType: parsedImage.mimeType || 'image/jpeg'
+      });
+
+      const pythonUrl = process.env.PYTHON_API_URL || 'http://localhost:8000';
+      const pyResponse = await axios.post(`${pythonUrl}/analyze-face`, form, {
+        headers: {
+          ...form.getHeaders()
+        },
+        timeout: 30000
+      });
+
+      if (pyResponse.data) {
+        if (pyResponse.data.faceShape) faceShape = pyResponse.data.faceShape;
+        if (pyResponse.data.contrastLevel) contrastLevel = pyResponse.data.contrastLevel;
+        if (pyResponse.data.status === "success" && pyResponse.data.censoredImage) {
+          finalImageData = pyResponse.data.censoredImage;
+          faceDetected = true;
+          console.log("[/api/preprocess-image] Face successfully detected and censored.");
+        } else if (pyResponse.data.censoredImage) {
+          finalImageData = pyResponse.data.censoredImage;
+          faceDetected = (pyResponse.data.status === "success");
+          console.log("[/api/preprocess-image] Python returned image. Status:", pyResponse.data.status);
+        }
+
+        const censorPath = path.join(__dirname, 'censored_latest.jpg');
+        fs.writeFileSync(censorPath, Buffer.from(finalImageData, 'base64'));
+        console.log(`\n\n🟢 PREVIEW CENSORED IMAGE CREATED: file:///${censorPath.replace(/\\/g, '/')}\n\n`);
+      }
+    } catch (pyErr) {
+      console.warn("[/api/preprocess-image] Python microservice failed or unreachable:", pyErr.message);
+    }
+
+    return res.json({
+      success: true,
+      censoredImage: `data:image/jpeg;base64,${finalImageData}`,
+      faceDetected,
+      faceShape,
+      contrastLevel,
+    });
+  } catch (err) {
+    console.error("Error in /api/preprocess-image:", err);
+    return res.status(500).json({ error: "Failed to preprocess image" });
+  }
+});
+
 app.post("/analyze-style", async (req, res) => {
 
   try {
@@ -1206,11 +1275,24 @@ app.post("/analyze-style", async (req, res) => {
       colorPreference,
       fitPreference,
       image,
+      isPreprocessed,
+      faceShape: passedFaceShape,
+      contrastLevel: passedContrastLevel,
     } = req.body || {};
 
-    if (!process.env.GEMINI_API_KEY) {
+    // Support user-provided custom Gemini API key (from request body, header, or user settings)
+    let providedApiKey = (req.body?.geminiApiKey || req.headers?.['x-gemini-api-key'] || '').toString().trim();
+    if (!providedApiKey && userId && mongoose.Types.ObjectId.isValid(userId)) {
+      const u = await User.findById(userId).select('settings').lean();
+      if (u?.settings?.geminiApiKey) {
+        providedApiKey = u.settings.geminiApiKey.trim();
+      }
+    }
+    const effectiveApiKey = providedApiKey || process.env.GEMINI_API_KEY;
+
+    if (!effectiveApiKey) {
       return res.status(500).json({
-        error: "GEMINI_API_KEY missing in .env"
+        error: "GEMINI_API_KEY missing. Please set it in .env or provide your custom Gemini API key in Settings."
       });
     }
 
@@ -1258,45 +1340,52 @@ app.post("/analyze-style", async (req, res) => {
       });
     }
 
-    // ==== HYBRID PYTHON PIPELINE ====
+    // ==== HYBRID PYTHON PIPELINE / PREPROCESSED BYPASS ====
     let finalImageData = parsedImage.data;
     let finalMimeType = parsedImage.mimeType;
-    let pyFaceShape = "Unknown";
-    let pyContrastLevel = "Unknown";
+    let pyFaceShape = passedFaceShape || "Unknown";
+    let pyContrastLevel = passedContrastLevel || "Unknown";
 
-    try {
-      const imageBuffer = Buffer.from(parsedImage.data, 'base64');
-      const form = new FormData();
-      form.append('file', imageBuffer, {
-        filename: 'upload.jpg',
-        contentType: parsedImage.mimeType || 'image/jpeg'
-      });
+    if (isPreprocessed) {
+      console.log("[/analyze-style] Image was preprocessed and verified by user. Bypassing python microservice.");
+      const censorPath = path.join(__dirname, 'censored_latest.jpg');
+      fs.writeFileSync(censorPath, Buffer.from(finalImageData, 'base64'));
+      console.log(`\n\n🟢 USER-APPROVED CENSORED IMAGE SENT TO GEMINI API! View it here: file:///${censorPath.replace(/\\/g, '/')}\n\n`);
+    } else {
+      try {
+        const imageBuffer = Buffer.from(parsedImage.data, 'base64');
+        const form = new FormData();
+        form.append('file', imageBuffer, {
+          filename: 'upload.jpg',
+          contentType: parsedImage.mimeType || 'image/jpeg'
+        });
 
-      const pythonUrl = process.env.PYTHON_API_URL || 'http://localhost:8000';
-      const pyResponse = await axios.post(`${pythonUrl}/analyze-face`, form, {
-        headers: {
-          ...form.getHeaders()
-        },
-        timeout: 30000
-      });
+        const pythonUrl = process.env.PYTHON_API_URL || 'http://localhost:8000';
+        const pyResponse = await axios.post(`${pythonUrl}/analyze-face`, form, {
+          headers: {
+            ...form.getHeaders()
+          },
+          timeout: 30000
+        });
 
-      if (pyResponse.data) {
-        if (pyResponse.data.faceShape) pyFaceShape = pyResponse.data.faceShape;
-        if (pyResponse.data.contrastLevel) pyContrastLevel = pyResponse.data.contrastLevel;
-        if (pyResponse.data.censoredImage) {
-          finalImageData = pyResponse.data.censoredImage;
-          finalMimeType = 'image/jpeg';
-          console.log("Python successfully censored a face in the image.");
-        } else {
-          console.log("Python did not detect a face to censor. Passing original image directly.");
+        if (pyResponse.data) {
+          if (pyResponse.data.faceShape) pyFaceShape = pyResponse.data.faceShape;
+          if (pyResponse.data.contrastLevel) pyContrastLevel = pyResponse.data.contrastLevel;
+          if (pyResponse.data.censoredImage) {
+            finalImageData = pyResponse.data.censoredImage;
+            finalMimeType = 'image/jpeg';
+            console.log("Python successfully censored a face in the image.");
+          } else {
+            console.log("Python did not detect a face to censor. Passing original image directly.");
+          }
+
+          const censorPath = path.join(__dirname, 'censored_latest.jpg');
+          fs.writeFileSync(censorPath, Buffer.from(finalImageData, 'base64'));
+          console.log(`\n\n🟢 IMAGE SENT TO API! View it here: file:///${censorPath.replace(/\\/g, '/')}\n\n`);
         }
-
-        const censorPath = path.join(__dirname, 'censored_latest.jpg');
-        fs.writeFileSync(censorPath, Buffer.from(finalImageData, 'base64'));
-        console.log(`\n\n🟢 IMAGE SENT TO API! View it here: file:///${censorPath.replace(/\\/g, '/')}\n\n`);
+      } catch (pyErr) {
+        console.warn("Python microservice failed or is unreachable. Falling back to default Gemini processing.", pyErr.message);
       }
-    } catch (pyErr) {
-      console.warn("Python microservice failed or is unreachable. Falling back to default Gemini processing.", pyErr.message);
     }
     // ================================
 
@@ -1391,8 +1480,8 @@ Detected Contrast Level: ${pyContrastLevel}
     const models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-3-flash-preview"];
 
     for (const modelName of GEMINI_MODELS_TO_TRY) {
-      console.log("Calling Gemini model:", modelName);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+      console.log(`Calling Gemini model: ${modelName} ${providedApiKey ? '(using custom user API key)' : '(using server default key)'}`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${effectiveApiKey}`;
 
       geminiResponse = await callGemini(url, geminiPayload);
 
@@ -1856,7 +1945,8 @@ app.get("/user/settings/:userId", async (req, res) => {
       avoid: { colors: [], patterns: [], fits: [] },
       privacy: { blurFace: true, storeImages: false, deleteAfterAnalysis: true },
       notifications: { ootd: true, recommendations: true },
-      theme: { mode: "light" }
+      theme: { mode: "light" },
+      geminiApiKey: ""
     };
 
     const settings = user.settings || {};
@@ -1865,7 +1955,8 @@ app.get("/user/settings/:userId", async (req, res) => {
       avoid: { ...defaults.avoid, ...settings.avoid },
       privacy: { ...defaults.privacy, ...settings.privacy },
       notifications: { ...defaults.notifications, ...settings.notifications },
-      theme: { ...defaults.theme, ...settings.theme }
+      theme: { ...defaults.theme, ...settings.theme },
+      geminiApiKey: settings.geminiApiKey || ""
     };
 
     return res.json({
@@ -1897,10 +1988,12 @@ app.put("/user/settings", async (req, res) => {
     // Build dot-notation $set object for deep merge
     const setObj = {};
     for (const section of Object.keys(settings)) {
-      if (typeof settings[section] === "object" && settings[section] !== null) {
+      if (typeof settings[section] === "object" && settings[section] !== null && !Array.isArray(settings[section])) {
         for (const field of Object.keys(settings[section])) {
           setObj[`settings.${section}.${field}`] = settings[section][field];
         }
+      } else {
+        setObj[`settings.${section}`] = settings[section];
       }
     }
 
@@ -1916,6 +2009,32 @@ app.put("/user/settings", async (req, res) => {
   } catch (err) {
     console.error("Update settings error:", err);
     return res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
+// POST /api/verify-gemini-key - Verify if a custom Gemini API key is valid
+app.post("/api/verify-gemini-key", async (req, res) => {
+  try {
+    const { apiKey } = req.body || {};
+    const keyToTest = (apiKey || "").toString().trim();
+    if (!keyToTest) {
+      return res.status(400).json({ success: false, error: "Please enter a Gemini API key to test." });
+    }
+
+    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${keyToTest}`;
+    const testPayload = {
+      contents: [{ parts: [{ text: "Respond with OK" }] }]
+    };
+
+    const resp = await callGemini(testUrl, testPayload);
+    if (resp.status < 400 && resp.data?.candidates) {
+      return res.json({ success: true, message: "Gemini API key is valid and working!" });
+    } else {
+      const errMsg = resp.data?.error?.message || "Invalid or unauthorized Gemini API key.";
+      return res.status(400).json({ success: false, error: errMsg });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to verify API key" });
   }
 });
 
@@ -1957,12 +2076,21 @@ app.post("/api/analyze-garment", async (req, res) => {
       }]
     };
 
+    let garmentApiKey = (req.body?.geminiApiKey || req.headers?.['x-gemini-api-key'] || '').toString().trim();
+    if (!garmentApiKey && userId && mongoose.Types.ObjectId.isValid(userId)) {
+      const u = await User.findById(userId).select('settings').lean();
+      if (u?.settings?.geminiApiKey) {
+        garmentApiKey = u.settings.geminiApiKey.trim();
+      }
+    }
+    const effectiveGarmentKey = garmentApiKey || process.env.GEMINI_API_KEY;
+
     let geminiResponse;
     let lastErrorData = null;
 
     for (const modelName of GEMINI_MODELS_TO_TRY) {
-      console.log(`[AnalyzeGarment] Trying model: ${modelName}`);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+      console.log(`[AnalyzeGarment] Trying model: ${modelName} ${garmentApiKey ? '(using custom user API key)' : '(using server default key)'}`);
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${effectiveGarmentKey}`;
 
       geminiResponse = await callGemini(url, geminiPayload);
 

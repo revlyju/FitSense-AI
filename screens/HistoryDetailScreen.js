@@ -4,13 +4,16 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import DbOutfitCard from '../components/DbOutfitCard';
+import useRequireAuth from '../hooks/useRequireAuth';
 
 export default function HistoryDetailScreen({ navigation, route }) {
-    const { id } = route.params;
+    const { isAuthenticated, isVerifying } = useRequireAuth();
+    const id = route?.params?.id;
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!isAuthenticated || !id) return;
         const fetchDetail = async () => {
             try {
                 const response = await axios.get(`${API_BASE_URL}/api/analysis-history/detail/${id}`);
@@ -22,7 +25,15 @@ export default function HistoryDetailScreen({ navigation, route }) {
             }
         };
         fetchDetail();
-    }, [id]);
+    }, [id, isAuthenticated]);
+
+    if (isVerifying || !isAuthenticated) {
+        return (
+            <View style={styles.center}>
+                <ActivityIndicator size="large" color="#25344F" />
+            </View>
+        );
+    }
 
     if (loading) {
         return (

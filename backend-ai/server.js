@@ -21,8 +21,6 @@ try {
 
 
 const app = express();
-
-app.use(express.json());
 app.use('/outfit_img', express.static(path.join(__dirname, 'outfit_img')));
 
 app.use(cors());

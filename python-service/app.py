@@ -17,6 +17,28 @@ from fastapi import FastAPI, File, UploadFile
 from mediapipe.tasks.python.core import base_options
 from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
 
+import os
+import sys
+import ctypes
+
+# Automatically load local shared libraries on headless Linux platforms (e.g. Render)
+local_lib_dirs = [
+    os.path.join(os.path.dirname(__file__), "local_libs", "usr", "lib", "x86_64-linux-gnu"),
+    os.path.join(os.path.dirname(__file__), "local_libs", "lib", "x86_64-linux-gnu"),
+    os.path.join(os.path.dirname(__file__), "local_libs", "usr", "lib"),
+]
+for ldir in local_lib_dirs:
+    if os.path.isdir(ldir):
+        if ldir not in os.environ.get("LD_LIBRARY_PATH", ""):
+            os.environ["LD_LIBRARY_PATH"] = f"{ldir}:{os.environ.get('LD_LIBRARY_PATH', '')}"
+        for lib_name in ["libglapi.so.0", "libglvnd.so.0", "libGLESv2.so.2", "libEGL.so.1", "libGL.so.1"]:
+            lib_path = os.path.join(ldir, lib_name)
+            if os.path.isfile(lib_path):
+                try:
+                    ctypes.CDLL(lib_path)
+                except Exception:
+                    pass
+
 MODEL_PATH = Path(__file__).resolve().parent / "face_landmarker.task"
 
 _face_landmarker: Optional[FaceLandmarker] = None
@@ -25,11 +47,6 @@ _face_landmarker: Optional[FaceLandmarker] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _face_landmarker
-    if not MODEL_PATH.is_file():
-        raise FileNotFoundError(
-            f"Missing face landmarker model at {MODEL_PATH}. "
-            "Add face_landmarker.task next to app.py (see MediaPipe face landmarker bundle)."
-        )
 
     # Print listening interfaces on startup
     import socket
@@ -39,7 +56,6 @@ async def lifespan(app: FastAPI):
     try:
         hostname = socket.gethostname()
         print("📡 Available Network Interfaces:")
-        # Attempt to get all IP addresses associated with this host
         ips = []
         for info in socket.getaddrinfo(hostname, None):
             ip = info[4][0]
@@ -51,16 +67,27 @@ async def lifespan(app: FastAPI):
         print(f"   - Failed to resolve hostname IPs: {e}")
     print("==================================================\n")
 
-    options = FaceLandmarkerOptions(
-        base_options=base_options.BaseOptions(model_asset_path=str(MODEL_PATH)),
-        running_mode=RunningMode.IMAGE,
-        num_faces=1,
-        min_face_detection_confidence=0.5,
-        min_face_presence_confidence=0.5,
-        output_face_blendshapes=False,
-        output_facial_transformation_matrixes=False,
-    )
-    _face_landmarker = FaceLandmarker.create_from_options(options)
+    if not MODEL_PATH.is_file():
+        print(f"⚠️ Warning: Missing face landmarker model at {MODEL_PATH}. MediaPipe will be disabled.")
+        _face_landmarker = None
+    else:
+        try:
+            options = FaceLandmarkerOptions(
+                base_options=base_options.BaseOptions(model_asset_path=str(MODEL_PATH)),
+                running_mode=RunningMode.IMAGE,
+                num_faces=1,
+                min_face_detection_confidence=0.5,
+                min_face_presence_confidence=0.5,
+                output_face_blendshapes=False,
+                output_facial_transformation_matrixes=False,
+            )
+            _face_landmarker = FaceLandmarker.create_from_options(options)
+            print("✅ MediaPipe FaceLandmarker successfully initialized.")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not initialize MediaPipe FaceLandmarker ({e}).")
+            print("ℹ️ Fallback activated: OpenCV Cascade classifier will handle face detection & censoring.")
+            _face_landmarker = None
+
     try:
         yield
     finally:
@@ -192,6 +219,35 @@ async def analyze_face(file: UploadFile = File(...)):
                 break
 
         if not points:
+            try:
+                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+
+                if len(faces) > 0:
+                    censored_image = image_bgr.copy()
+                    for (fx, fy, fw, fh) in faces:
+                        px = int(fw * 0.1)
+                        py = int(fh * 0.1)
+                        cx1 = max(0, fx - px)
+                        cy1 = max(0, fy - py)
+                        cx2 = min(w, fx + fw + px)
+                        cy2 = min(h, fy + fh + py)
+                        cv2.rectangle(censored_image, (cx1, cy1), (cx2, cy2), (0, 0, 0), -1)
+
+                    contrast = detect_contrast(image_bgr)
+                    _, buffer = cv2.imencode(".jpg", censored_image)
+                    print(f"OPENCV CASCADE SUCCESS: {len(faces)} face(s) detected and censored.")
+                    return {
+                        "faceShape": "Balanced",
+                        "contrastLevel": contrast,
+                        "censoredImage": base64.b64encode(buffer).decode("utf-8"),
+                        "status": "success",
+                        "detectedLandmarks": 0
+                    }
+            except Exception as cascade_err:
+                print(f"OpenCV cascade error: {cascade_err}")
+
             _, buffer = cv2.imencode(".jpg", image_bgr)
             return {
                 "faceShape": "Unknown",

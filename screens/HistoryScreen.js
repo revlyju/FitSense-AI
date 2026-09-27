@@ -2,13 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_BASE_URL } from '../config';
 import useRequireAuth from '../hooks/useRequireAuth';
 
 export default function HistoryScreen({ navigation }) {
-    const { isAuthenticated, userId: authUserId, isVerifying } = useRequireAuth();
+    const { isAuthenticated, userId: authUserId } = useRequireAuth();
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [userId, setUserId] = useState(null);
@@ -23,7 +23,7 @@ export default function HistoryScreen({ navigation }) {
 
             setLoading(true);
             setUserId(id);
-            const response = await axios.get(`${API_BASE_URL}/api/analysis-history/${id}`);
+            const response = await axios.get(`${API_BASE_URL}/api/analysis-history/${id}`, { timeout: 8000 });
             setHistory(Array.isArray(response.data) ? response.data : []);
         } catch (e) {
             console.error("Failed to load history list:", e);
@@ -33,17 +33,39 @@ export default function HistoryScreen({ navigation }) {
         }
     };
 
+    // Safety timeout: Never stay stuck in loading state longer than 8 seconds
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setLoading(false);
+        }, 8000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    // Load on initial mount
+    useEffect(() => {
+        let isActive = true;
+        const init = async () => {
+            const id = authUserId || (await AsyncStorage.getItem('userId'));
+            if (isActive) {
+                if (id) {
+                    await fetchHistory(id);
+                } else {
+                    setLoading(false);
+                }
+            }
+        };
+        init();
+        return () => { isActive = false; };
+    }, [authUserId]);
+
+    // Refresh on screen focus
     useFocusEffect(
         useCallback(() => {
             let isActive = true;
             const init = async () => {
                 const id = authUserId || (await AsyncStorage.getItem('userId'));
-                if (isActive) {
-                    if (id) {
-                        await fetchHistory(id);
-                    } else {
-                        setLoading(false);
-                    }
+                if (isActive && id) {
+                    await fetchHistory(id);
                 }
             };
             init();
@@ -67,14 +89,6 @@ export default function HistoryScreen({ navigation }) {
             <Ionicons name="chevron-forward" size={20} color="#ccc" />
         </TouchableOpacity>
     );
-
-    if (isVerifying || !isAuthenticated) {
-        return (
-            <View style={[styles.container, styles.center]}>
-                <ActivityIndicator size="large" color="#632024" />
-            </View>
-        );
-    }
 
     return (
         <View style={styles.container}>

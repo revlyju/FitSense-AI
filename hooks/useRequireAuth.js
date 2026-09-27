@@ -46,6 +46,10 @@ export function useRequireAuth() {
     }
   }, [navigation]);
 
+  useEffect(() => {
+    verifyAuthentication();
+  }, [verifyAuthentication]);
+
   useFocusEffect(
     useCallback(() => {
       verifyAuthentication();

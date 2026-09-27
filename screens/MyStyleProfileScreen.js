@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -19,7 +19,7 @@ import useRequireAuth from '../hooks/useRequireAuth';
 
 export default function MyStyleProfileScreen({ navigation }) {
     const { theme, isDark } = useTheme();
-    const { isAuthenticated, userId: authUserId, isVerifying } = useRequireAuth();
+    const { isAuthenticated, userId: authUserId } = useRequireAuth();
     const [userId, setUserId] = useState(null);
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -35,31 +35,49 @@ export default function MyStyleProfileScreen({ navigation }) {
             setLoading(true);
             setUserId(id);
 
-            const response = await axios.get(`${API_BASE_URL}/user-profile/${id}`);
+            const response = await axios.get(`${API_BASE_URL}/user-profile/${id}`, { timeout: 8000 });
             setProfile(response.data || { populatedLikedOutfits: [] });
         } catch (error) {
-            console.error('Failed to load profile', error);
-            if (error.response?.status === 404) {
-                setProfile({ populatedLikedOutfits: [] });
-            } else {
-                setProfile({ populatedLikedOutfits: [] });
-            }
+            console.error('Failed to load profile', error?.message || error);
+            setProfile({ populatedLikedOutfits: [] });
         } finally {
             setLoading(false);
         }
     };
 
+    // Safety timeout: Never stay stuck in loading state longer than 8 seconds
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setLoading(false);
+        }, 8000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    // Load on initial mount
+    useEffect(() => {
+        let isActive = true;
+        const init = async () => {
+            const id = authUserId || (await AsyncStorage.getItem('userId'));
+            if (isActive) {
+                if (id) {
+                    await fetchProfile(id);
+                } else {
+                    setLoading(false);
+                }
+            }
+        };
+        init();
+        return () => { isActive = false; };
+    }, [authUserId]);
+
+    // Refresh on screen focus
     useFocusEffect(
         useCallback(() => {
             let isActive = true;
             const init = async () => {
                 const id = authUserId || (await AsyncStorage.getItem('userId'));
-                if (isActive) {
-                    if (id) {
-                        await fetchProfile(id);
-                    } else {
-                        setLoading(false);
-                    }
+                if (isActive && id) {
+                    await fetchProfile(id);
                 }
             };
             init();
@@ -67,7 +85,7 @@ export default function MyStyleProfileScreen({ navigation }) {
         }, [authUserId])
     );
 
-    if (isVerifying || (loading && !profile)) {
+    if (loading && !profile) {
         return (
             <View style={[styles.container, styles.center, { backgroundColor: theme.background }]}>
                 <ActivityIndicator size="large" color={theme.accent} />
@@ -75,24 +93,8 @@ export default function MyStyleProfileScreen({ navigation }) {
         );
     }
 
-    if (!profile) {
-        return (
-            <View style={[styles.container, { backgroundColor: theme.background }]}>
-                <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-                    <TouchableOpacity onPress={() => navigation.toggleDrawer()} style={styles.menuButton}>
-                        <Ionicons name="menu-outline" size={28} color={theme.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Liked Outfits</Text>
-                </View>
-                <View style={styles.center}>
-                    <Ionicons name="heart-outline" size={64} color={theme.textSecondary} />
-                    <Text style={[styles.emptyText, { color: theme.textSecondary, marginBottom: 20 }]}>No liked outfits found.</Text>
-                </View>
-            </View>
-        );
-    }
-
-    const { styleMemory, populatedLikedOutfits } = profile;
+    const currentProfile = profile || { populatedLikedOutfits: [] };
+    const { styleMemory, populatedLikedOutfits } = currentProfile;
     const hasMemory = styleMemory && styleMemory.interactionCount > 0;
 
     return (

@@ -19,11 +19,12 @@ try {
   console.warn("Could not set DNS servers:", error);
 }
 
+
+const app = express();
+
 app.use(express.json());
 app.use('/outfit_img', express.static(path.join(__dirname, 'outfit_img')));
 
-
-const app = express();
 app.use(cors());
 app.use(express.json({ limit: "75mb" }));
 

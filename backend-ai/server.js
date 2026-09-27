@@ -184,13 +184,15 @@ const Outfit = outfitsDb.model("Outfit", outfitSchema, "outfits");
 
 const GEMINI_MODELS_TO_TRY = [
   process.env.GEMINI_MODEL,
+  "gemini-flash-latest",
+  "gemini-2.5-flash",
   "gemini-1.5-flash",
   "gemini-1.5-flash-latest",
   "gemini-2.0-flash",
   "gemini-2.0-flash-exp",
   "gemini-3-flash-preview",
 ].filter(Boolean);
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -338,7 +340,11 @@ app.post("/unlike-outfit", async (req, res) => {
 
 app.get("/user-profile/:userId", async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId).lean();
+    const { userId } = req.params;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(404).json({ error: "Invalid user id" });
+    }
+    const user = await User.findById(userId).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
 
     // Convert generic IDs into full DB outfits
@@ -1836,6 +1842,9 @@ app.get("/api/dashboard/:userId", async (req, res) => {
 app.get("/api/analysis-history/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.json([]);
+    }
     const history = await AnalysisHistory.find({ userId })
       .sort({ createdAt: -1 })
       .select("_id analysisName createdAt");
@@ -2194,25 +2203,61 @@ app.post("/api/chat", async (req, res) => {
     if (userId && mongoose.Types.ObjectId.isValid(userId)) {
       const user = await User.findById(userId);
       if (user) {
-        userContext = `\n\nUser Context:\nGender: ${user.gender}\nSeason: ${user.analysis?.colorSeason}\nUndertone: ${user.analysis?.undertone}\nBody Shape: ${user.analysis?.bodyShape}`;
+        userContext = `\n\nUser Context:\nGender: ${user.gender || "Not specified"}\nSeason: ${user.analysis?.colorSeason || "Not specified"}\nUndertone: ${user.analysis?.undertone || "Not specified"}\nBody Shape: ${user.analysis?.bodyShape || "Not specified"}`;
       }
     }
 
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: `You are the AI Stylist assistant. Help users with fashion, style advice, and outfit recommendations based on their analysis.${userContext}\n\nKeep advice concise and encouraging.`
-        },
-        ...messages
-      ],
-      model: "llama-3.3-70b-versatile",
-    });
+    const systemPrompt = `You are the AI Stylist assistant. Help users with fashion, style advice, and outfit recommendations based on their analysis.${userContext}\n\nKeep advice concise and encouraging.`;
 
-    res.json({ content: chatCompletion.choices[0].message.content });
+    let replyText = null;
+
+    // Try Groq first with working models
+    const groqCandidateModels = [GROQ_MODEL, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"].filter(Boolean);
+    if (process.env.GROQ_API_KEY) {
+      for (const m of groqCandidateModels) {
+        try {
+          const chatCompletion = await groq.chat.completions.create({
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt
+              },
+              ...(messages || [])
+            ],
+            model: m,
+          });
+          replyText = chatCompletion.choices?.[0]?.message?.content;
+          if (replyText) break;
+        } catch (groqErr) {
+          console.warn(`[Chat] Groq model ${m} failed:`, groqErr?.message || groqErr);
+        }
+      }
+    }
+
+    // Fall back to Gemini if Groq failed or was unavailable
+    if (!replyText && process.env.GEMINI_API_KEY) {
+      try {
+        const lastUserMsg = (messages || []).slice().reverse().find(m => m.role === 'user')?.content || "Hello";
+        const geminiChatUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
+        const geminiChatRes = await axios.post(geminiChatUrl, {
+          contents: [{
+            parts: [{ text: `${systemPrompt}\n\nUser: ${lastUserMsg}` }]
+          }]
+        }, { timeout: 15000 });
+        replyText = geminiChatRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      } catch (geminiErr) {
+        console.error("[Chat] Gemini fallback error:", geminiErr?.message || geminiErr);
+      }
+    }
+
+    if (!replyText) {
+      return res.status(500).json({ error: "Failed to get response from AI" });
+    }
+
+    res.json({ content: replyText });
   } catch (error) {
-    console.error("Groq Chat Error:", error);
-    res.status(500).json({ error: "Failed to get response from Groq" });
+    console.error("Chat Error:", error);
+    res.status(500).json({ error: "Failed to get response from AI" });
   }
 });
 

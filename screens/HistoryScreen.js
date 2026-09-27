@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_BASE_URL } from '../config';
 import useRequireAuth from '../hooks/useRequireAuth';
@@ -12,26 +13,43 @@ export default function HistoryScreen({ navigation }) {
     const [loading, setLoading] = useState(true);
     const [userId, setUserId] = useState(null);
 
-    const fetchHistory = async () => {
-        if (!authUserId) return;
-        setLoading(true);
+    const fetchHistory = async (targetId) => {
         try {
-            setUserId(authUserId);
-            const response = await axios.get(`${API_BASE_URL}/api/analysis-history/${authUserId}`);
-            setHistory(response.data);
+            const id = targetId || authUserId || (await AsyncStorage.getItem('userId'));
+            if (!id) {
+                setLoading(false);
+                return;
+            }
+
+            setLoading(true);
+            setUserId(id);
+            const response = await axios.get(`${API_BASE_URL}/api/analysis-history/${id}`);
+            setHistory(Array.isArray(response.data) ? response.data : []);
         } catch (e) {
             console.error("Failed to load history list:", e);
+            setHistory([]);
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => {
-        const unsubscribe = navigation.addListener('focus', () => {
-            fetchHistory();
-        });
-        return unsubscribe;
-    }, [navigation]);
+    useFocusEffect(
+        useCallback(() => {
+            let isActive = true;
+            const init = async () => {
+                const id = authUserId || (await AsyncStorage.getItem('userId'));
+                if (isActive) {
+                    if (id) {
+                        await fetchHistory(id);
+                    } else {
+                        setLoading(false);
+                    }
+                }
+            };
+            init();
+            return () => { isActive = false; };
+        }, [authUserId])
+    );
 
     const renderItem = ({ item }) => (
         <TouchableOpacity

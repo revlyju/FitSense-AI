@@ -24,17 +24,26 @@ export default function MyStyleProfileScreen({ navigation }) {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    const fetchProfile = async () => {
-        if (!authUserId) return;
+    const fetchProfile = async (targetId) => {
         try {
-            setLoading(true);
-            setUserId(authUserId);
+            const id = targetId || authUserId || (await AsyncStorage.getItem('userId'));
+            if (!id) {
+                setLoading(false);
+                return;
+            }
 
-            const response = await axios.get(`${API_BASE_URL}/user-profile/${authUserId}`);
-            setProfile(response.data);
+            setLoading(true);
+            setUserId(id);
+
+            const response = await axios.get(`${API_BASE_URL}/user-profile/${id}`);
+            setProfile(response.data || { populatedLikedOutfits: [] });
         } catch (error) {
             console.error('Failed to load profile', error);
-            Alert.alert('Error', 'Could not load your style memory.');
+            if (error.response?.status === 404) {
+                setProfile({ populatedLikedOutfits: [] });
+            } else {
+                setProfile({ populatedLikedOutfits: [] });
+            }
         } finally {
             setLoading(false);
         }
@@ -42,11 +51,23 @@ export default function MyStyleProfileScreen({ navigation }) {
 
     useFocusEffect(
         useCallback(() => {
-            fetchProfile();
-        }, [])
+            let isActive = true;
+            const init = async () => {
+                const id = authUserId || (await AsyncStorage.getItem('userId'));
+                if (isActive) {
+                    if (id) {
+                        await fetchProfile(id);
+                    } else {
+                        setLoading(false);
+                    }
+                }
+            };
+            init();
+            return () => { isActive = false; };
+        }, [authUserId])
     );
 
-    if (isVerifying || !isAuthenticated || loading) {
+    if (isVerifying || (loading && !profile)) {
         return (
             <View style={[styles.container, styles.center, { backgroundColor: theme.background }]}>
                 <ActivityIndicator size="large" color={theme.accent} />
@@ -65,24 +86,7 @@ export default function MyStyleProfileScreen({ navigation }) {
                 </View>
                 <View style={styles.center}>
                     <Ionicons name="heart-outline" size={64} color={theme.textSecondary} />
-                    <Text style={[styles.emptyText, { color: theme.textSecondary, marginBottom: 20 }]}>Please login to see your liked outfits</Text>
-                    <TouchableOpacity
-                        style={{
-                            backgroundColor: theme.accent,
-                            paddingHorizontal: 24,
-                            paddingVertical: 12,
-                            borderRadius: 10,
-                            shadowColor: theme.accent,
-                            shadowOffset: { width: 0, height: 4 },
-                            shadowOpacity: 0.3,
-                            shadowRadius: 6,
-                            elevation: 4
-                        }}
-                        onPress={() => navigation.getParent()?.replace('Auth')}
-                        activeOpacity={0.8}
-                    >
-                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Login / Sign Up</Text>
-                    </TouchableOpacity>
+                    <Text style={[styles.emptyText, { color: theme.textSecondary, marginBottom: 20 }]}>No liked outfits found.</Text>
                 </View>
             </View>
         );

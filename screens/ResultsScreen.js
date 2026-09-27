@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Alert,
   Animated,
@@ -10,8 +10,10 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  BackHandler,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ColorCard from '../components/ColorCard';
@@ -78,6 +80,66 @@ const ResultsScreen = ({ navigation, route }) => {
   const fadeAnim  = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(40)).current;
 
+  const handleGoToDashboard = useCallback(async () => {
+    try {
+      const storedUserId = await AsyncStorage.getItem('userId');
+      const activeId = storedUserId || route?.params?.userId;
+      if (activeId) {
+        navigation.reset({ 
+          index: 0,
+          routes: [{
+            name: 'Main',
+            params: {
+              screen: 'DashboardRoot',
+              params: { userId: activeId }
+            }
+          }]
+        });
+      } else {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
+      }
+    } catch (e) {
+      console.error('Error reading userId:', e);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    }
+  }, [navigation, route?.params?.userId]);
+
+  const handleBack = useCallback(() => {
+    if (isActuallyGuest) {
+      navigation.reset({
+        index: 1,
+        routes: [{ name: 'Login' }, { name: 'GuestOnboarding' }],
+      });
+    } else {
+      handleGoToDashboard();
+    }
+  }, [isActuallyGuest, navigation, handleGoToDashboard]);
+
+  // Handle Android hardware back press: Guest -> GuestOnboarding, Logged-in -> Dashboard
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        handleBack();
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => {
+        if (subscription?.remove) {
+          subscription.remove();
+        } else {
+          BackHandler.removeEventListener('hardwareBackPress', onBackPress);
+        }
+      };
+    }, [handleBack])
+  );
+
   useEffect(() => {
     // Cross-check with local storage to be safe, but prioritize the explicit flag
     if (!isActuallyGuest) {
@@ -93,12 +155,12 @@ const ResultsScreen = ({ navigation, route }) => {
   }, []);
 
   useEffect(() => {
-    if (!analysisResults || !userPreferences) {
-      navigation.replace('Onboarding');
+    if (!analysisResults) {
+      handleBack();
     }
-  }, [analysisResults, userPreferences, navigation]);
+  }, [analysisResults, handleBack]);
 
-  if (!analysisResults || !userPreferences) {
+  if (!analysisResults) {
     return null;
   }
 
@@ -154,48 +216,12 @@ const ResultsScreen = ({ navigation, route }) => {
     });
   };
 
-  const handleBack = () => {
-    navigation.navigate('Onboarding');
-  };
-
-  const handleGoToDashboard = async () => {
-    try {
-      const storedUserId = await AsyncStorage.getItem('userId');
-      if (storedUserId) {
-        navigation.replace('Main', { 
-          screen: 'DashboardRoot',
-          params: { userId: storedUserId }
-        });
-      } else {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
-      }
-    } catch (e) {
-      console.error('Error reading userId:', e);
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
-    }
-  };
-
   return (
     <View style={styles.mainWrapper}>
       {/* Header */}
       <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
         <TouchableOpacity 
-          onPress={() => {
-            if (isActuallyGuest) {
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
-            } else {
-              handleBack();
-            }
-          }} 
+          onPress={handleBack} 
           style={styles.backButton} 
           activeOpacity={0.7}
         >
@@ -205,16 +231,7 @@ const ResultsScreen = ({ navigation, route }) => {
         <Text style={styles.title}>Your Style Profile</Text>
         
         <TouchableOpacity 
-          onPress={() => {
-            if (isActuallyGuest) {
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Login' }],
-              });
-            } else {
-              handleGoToDashboard();
-            }
-          }} 
+          onPress={handleBack} 
           style={styles.dashboardButton} 
           activeOpacity={0.7}
         >
@@ -389,7 +406,7 @@ const ResultsScreen = ({ navigation, route }) => {
         <View style={styles.guestBottomSection}>
           <TouchableOpacity
             style={styles.guestStartOverBtn}
-            onPress={() => navigation.replace('Onboarding')}
+            onPress={handleBack}
             activeOpacity={0.8}
           >
             <Ionicons name="refresh-outline" size={18} color="#25344F" style={{ marginRight: 8 }} />

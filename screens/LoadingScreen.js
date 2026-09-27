@@ -116,15 +116,44 @@ const LoadingScreen = ({ navigation, route }) => {
             console.error('Failed to save style profile', e?.response?.data || e.message);
           }
  
-          navigation.replace('Main', {
-            screen: 'DashboardRoot',
-            params: { userId: activeUserId }
+          // Reset navigation stack so Dashboard is behind Results without preferences screens in between
+          navigation.reset({
+            index: 1,
+            routes: [
+              {
+                name: 'Main',
+                params: {
+                  screen: 'DashboardRoot',
+                  params: { userId: activeUserId }
+                }
+              },
+              {
+                name: 'Results',
+                params: {
+                  analysisResults: response.data,
+                  userPreferences,
+                  userId: activeUserId,
+                  isGuest: false,
+                }
+              }
+            ]
           });
         } else {
-          navigation.replace("Results", {
-            analysisResults: response.data,
-            userPreferences,
-            isGuest: true, // explicitly tell ResultsScreen it's a guest
+          // Reset navigation stack for guest flow fallback
+          navigation.reset({
+            index: 2,
+            routes: [
+              { name: 'Login' },
+              { name: 'GuestOnboarding' },
+              {
+                name: 'Results',
+                params: {
+                  analysisResults: response.data,
+                  userPreferences,
+                  isGuest: true,
+                }
+              }
+            ]
           });
         }
       } catch (error) {

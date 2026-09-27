@@ -59,9 +59,10 @@ export default function AIChatbotScreen({ navigation }) {
                 content: m.text
             }));
 
+            const activeId = userId || authUserId || (await AsyncStorage.getItem('userId'));
             const response = await axios.post(`${API_BASE_URL}/api/chat`, {
                 messages: apiMessages,
-                userId: userId
+                userId: activeId || undefined
             });
 
             if (response.data && response.data.content) {

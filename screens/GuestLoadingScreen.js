@@ -67,10 +67,20 @@ export default function GuestLoadingScreen({ navigation, route }) {
           throw new Error(response.data.error);
         }
 
-        // Navigate directly to dedicated GuestResults screen
-        navigation.replace('GuestResults', {
-          analysisResults: response.data,
-          userPreferences,
+        // Reset navigation stack to prune intermediate preferences screens so back lands on GuestOnboarding
+        navigation.reset({
+          index: 2,
+          routes: [
+            { name: 'Login' },
+            { name: 'GuestOnboarding' },
+            {
+              name: 'GuestResults',
+              params: {
+                analysisResults: response.data,
+                userPreferences,
+              },
+            },
+          ],
         });
       } catch (error) {
         console.error('Guest analysis error:', error);

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Animated,
   Easing,
@@ -12,7 +12,9 @@ import {
   View,
   Alert,
   StatusBar,
+  BackHandler,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ColorCard from '../components/ColorCard';
 import DbOutfitCard from '../components/DbOutfitCard';
@@ -75,6 +77,35 @@ export default function GuestResultsScreen({ navigation, route }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 
+  const handleBackToGuestHome = useCallback(() => {
+    navigation.reset({
+      index: 1,
+      routes: [
+        { name: 'Login' },
+        { name: 'GuestOnboarding' },
+      ],
+    });
+  }, [navigation]);
+
+  // Handle Android hardware back press: return to Guest Home/Entry screen
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        handleBackToGuestHome();
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => {
+        if (subscription?.remove) {
+          subscription.remove();
+        } else {
+          BackHandler.removeEventListener('hardwareBackPress', onBackPress);
+        }
+      };
+    }, [handleBackToGuestHome])
+  );
+
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 600, easing: Easing.out(Easing.exp), useNativeDriver: true }),
@@ -82,21 +113,17 @@ export default function GuestResultsScreen({ navigation, route }) {
     ]).start();
   }, []);
 
-  // Return to Login page if results are missing
+  // Return to Guest Home screen if results are missing
   useEffect(() => {
     if (!analysisResults) {
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
+      handleBackToGuestHome();
     }
-  }, [analysisResults, navigation]);
+  }, [analysisResults, handleBackToGuestHome]);
 
   if (!analysisResults) {
     return null;
   }
 
-  // CRITICAL REQUIREMENT: "clicking back from the results page of use as a guest should lead the user back to the login page."
   const handleBackToLogin = () => {
     navigation.reset({
       index: 0,
@@ -151,12 +178,12 @@ export default function GuestResultsScreen({ navigation, route }) {
 
       {/* Top Header */}
       <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-        {/* Requirement: Clicking back leads the user back to the login page */}
+        {/* Clicking back leads the guest back to Guest Home/Entry screen */}
         <TouchableOpacity
-          onPress={handleBackToLogin}
+          onPress={handleBackToGuestHome}
           style={styles.backButton}
           activeOpacity={0.7}
-          accessibilityLabel="Back to Login"
+          accessibilityLabel="Back to Guest Home"
         >
           <Ionicons name="arrow-back" size={22} color="#25344F" />
         </TouchableOpacity>

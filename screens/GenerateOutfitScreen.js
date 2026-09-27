@@ -68,9 +68,13 @@ export default function GenerateOutfitScreen({ navigation }) {
                 console.error("Failed to read geminiApiKey", e);
             }
 
+            const activeUserId = await AsyncStorage.getItem('userId');
             const response = await axios.post(`${API_BASE_URL}/api/analyze-garment`, {
                 image: imageBase64,
+                userId: activeUserId || undefined,
                 geminiApiKey: customKey || undefined,
+            }, {
+                timeout: 60000
             });
 
             if (response.data.success && response.data.analysis) {

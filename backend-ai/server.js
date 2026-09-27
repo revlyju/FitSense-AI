@@ -350,12 +350,17 @@ app.get("/user-profile/:userId", async (req, res) => {
     // Convert generic IDs into full DB outfits
     const Outfit = mongoose.connection.useDb('outfits').model("Outfit", new mongoose.Schema({}, { strict: false }), "outfits");
 
-    const likedIds = (user.likedOutfits || []).map(lo => lo.outfitId);
+    const likedIds = (user.likedOutfits || []).map(lo => lo.outfitId).filter(Boolean);
     let populatedOutfits = [];
     if (likedIds.length > 0) {
-      // Search via both standard _id mapping or custom id strings
+      // Search via both standard _id mapping or custom id strings, safely filtering valid ObjectIds
+      const validObjectIds = likedIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+      const queryConditions = [{ id: { $in: likedIds } }];
+      if (validObjectIds.length > 0) {
+        queryConditions.push({ _id: { $in: validObjectIds } });
+      }
       populatedOutfits = await Outfit.find({
-        $or: [{ id: { $in: likedIds } }, { _id: { $in: likedIds } }]
+        $or: queryConditions
       }).lean();
     }
 

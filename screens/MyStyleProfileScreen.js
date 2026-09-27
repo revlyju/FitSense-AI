@@ -6,6 +6,7 @@ import { useCallback, useState, useEffect } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -21,49 +22,60 @@ export default function MyStyleProfileScreen({ navigation }) {
     const { theme, isDark } = useTheme();
     const { isAuthenticated, userId: authUserId } = useRequireAuth();
     const [userId, setUserId] = useState(null);
-    const [profile, setProfile] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [profile, setProfile] = useState({ populatedLikedOutfits: [] });
+    const [loading, setLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+    const [errorMessage, setErrorMessage] = useState(null);
 
-    const fetchProfile = async (targetId) => {
+    const fetchProfile = async (targetId, isPullRefresh = false) => {
         try {
-            const id = targetId || authUserId || (await AsyncStorage.getItem('userId'));
+            const id = targetId || userId || authUserId || (await AsyncStorage.getItem('userId'));
             if (!id) {
                 setLoading(false);
+                setRefreshing(false);
                 return;
             }
 
-            setLoading(true);
             setUserId(id);
+            if (isPullRefresh) {
+                setRefreshing(true);
+            } else if (!profile?.populatedLikedOutfits?.length) {
+                setLoading(true);
+            }
+            setErrorMessage(null);
 
-            const response = await axios.get(`${API_BASE_URL}/user-profile/${id}`, { timeout: 8000 });
-            setProfile(response.data || { populatedLikedOutfits: [] });
+            // First check local cache for instantaneous render
+            try {
+                const cached = await AsyncStorage.getItem(`@cache_profile_${id}`);
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (parsed) setProfile(parsed);
+                }
+            } catch (ce) {
+                // Ignore cache read error
+            }
+
+            const response = await axios.get(`${API_BASE_URL}/user-profile/${id}`, { timeout: 7000 });
+            if (response.data) {
+                setProfile(response.data);
+                AsyncStorage.setItem(`@cache_profile_${id}`, JSON.stringify(response.data)).catch(() => {});
+            }
         } catch (error) {
             console.error('Failed to load profile', error?.message || error);
-            setProfile({ populatedLikedOutfits: [] });
+            setErrorMessage('Unable to sync latest style profile. Tap to retry.');
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     };
-
-    // Safety timeout: Never stay stuck in loading state longer than 8 seconds
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setLoading(false);
-        }, 8000);
-        return () => clearTimeout(timer);
-    }, []);
 
     // Load on initial mount
     useEffect(() => {
         let isActive = true;
         const init = async () => {
             const id = authUserId || (await AsyncStorage.getItem('userId'));
-            if (isActive) {
-                if (id) {
-                    await fetchProfile(id);
-                } else {
-                    setLoading(false);
-                }
+            if (isActive && id) {
+                await fetchProfile(id);
             }
         };
         init();
@@ -85,16 +97,8 @@ export default function MyStyleProfileScreen({ navigation }) {
         }, [authUserId])
     );
 
-    if (loading && !profile) {
-        return (
-            <View style={[styles.container, styles.center, { backgroundColor: theme.background }]}>
-                <ActivityIndicator size="large" color={theme.accent} />
-            </View>
-        );
-    }
-
     const currentProfile = profile || { populatedLikedOutfits: [] };
-    const { styleMemory, populatedLikedOutfits } = currentProfile;
+    const { styleMemory, populatedLikedOutfits = [] } = currentProfile;
     const hasMemory = styleMemory && styleMemory.interactionCount > 0;
 
     return (
@@ -104,9 +108,36 @@ export default function MyStyleProfileScreen({ navigation }) {
                     <Ionicons name="menu-outline" size={28} color={theme.text} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>Liked Outfits</Text>
+                {loading && (
+                    <ActivityIndicator size="small" color={theme.accent} style={{ marginLeft: 10 }} />
+                )}
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            {errorMessage ? (
+                <TouchableOpacity
+                    style={[styles.errorBanner, { backgroundColor: isDark ? '#331a1a' : '#ffebee' }]}
+                    onPress={() => fetchProfile(userId)}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="alert-circle-outline" size={18} color="#d32f2f" />
+                    <Text style={[styles.errorText, { color: isDark ? '#ff8a80' : '#c62828' }]}>
+                        {errorMessage}
+                    </Text>
+                </TouchableOpacity>
+            ) : null}
+
+            <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={() => fetchProfile(userId, true)}
+                        colors={[theme.accent]}
+                        tintColor={theme.accent}
+                    />
+                }
+            >
 
                 {/* STYLE MEMORY ENGINE SECTION */}
                 <View style={styles.section}>
@@ -318,5 +349,20 @@ const styles = StyleSheet.create({
         color: '#6F4D38',
         fontSize: 15,
         fontStyle: 'italic'
+    },
+    errorBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        marginHorizontal: 16,
+        marginTop: 10,
+        borderRadius: 8,
+        gap: 8,
+    },
+    errorText: {
+        fontSize: 13,
+        fontWeight: '500',
+        flex: 1,
     }
 });
